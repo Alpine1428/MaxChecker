@@ -1,0 +1,3793 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+╔═══════════════════════════════════════════════════════════════════╗
+║                    HOLYWORLD AUTO CHECKER v7.8                     ║
+║      Ultimate Edition + Embedded Video + Full Integration          ║
+║         Cheat Sites Detection + All Manual Checks Combined         ║
+╚═══════════════════════════════════════════════════════════════════╝
+"""
+
+import os
+import sys
+import re
+import json
+import gzip
+import subprocess
+import datetime
+import ctypes
+import ctypes.wintypes
+import zipfile
+import threading
+import time
+import platform
+import sqlite3
+import shutil
+import tempfile
+import hashlib
+import struct
+import math
+import io
+import base64
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext, filedialog
+from typing import List, Dict, Optional, Set, Tuple, Any
+from dataclasses import dataclass, field
+from collections import Counter
+
+
+
+def is_frozen() -> bool:
+    """
+    True, если программа запущена как скомпилированный EXE (PyInstaller),
+    False — если как обычный .py.
+    """
+    return getattr(sys, "frozen", False)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# УСТАНОВКА ЗАВИСИМОСТЕЙ
+# ═══════════════════════════════════════════════════════════════════
+
+def install_video_dependencies():
+    """
+    Устанавливает opencv/pillow/imageio ТОЛЬКО при запуске .py.
+    В скомпилированном EXE это НЕЛЬЗЯ делать, иначе EXE вызывает сам себя.
+    """
+    if is_frozen():
+        return  # в EXE всё уже упаковано
+
+    packages = ['opencv-python', 'pillow', 'imageio', 'imageio-ffmpeg']
+    for package in packages:
+        try:
+            if package == 'opencv-python':
+                __import__('cv2')
+            elif package == 'pillow':
+                __import__('PIL')
+            elif package == 'imageio':
+                __import__('imageio')
+            else:
+                continue
+        except ImportError:
+            try:
+                subprocess.check_call(
+                    [sys.executable, '-m', 'pip', 'install', package, '-q'],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except:
+                pass
+
+
+def install_dependencies():
+    """
+    Установка psutil, wmi, pywin32 и др. ТОЛЬКО при запуске .py.
+    В EXE это приведёт к рекурсивному запуску самого себя.
+    """
+    if is_frozen():
+        return
+
+    required = {
+        'psutil': 'psutil',
+        'wmi': 'wmi',
+        'win32api': 'pywin32',
+        'requests': 'requests'
+    }
+    for module, package in required.items():
+        try:
+            __import__(module)
+        except ImportError:
+            try:
+                subprocess.check_call(
+                    [sys.executable, '-m', 'pip', 'install', package, '-q'],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except:
+                pass
+
+
+# ВАЖНО: вызывать установку зависимостей ТОЛЬКО на Windows и ТОЛЬКО при запуске .py
+if sys.platform == 'win32' and not is_frozen():
+    install_dependencies()
+    install_video_dependencies()
+
+# ═══════════════════════════════════════════════════════════════════
+# Дальше обычные импорты модулей
+# ═══════════════════════════════════════════════════════════════════
+
+import psutil
+import requests
+import urllib3
+urllib3.disable_warnings()
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except:
+    CV2_AVAILABLE = False
+
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except:
+    PIL_AVAILABLE = False
+
+try:
+    import wmi
+    WMI_AVAILABLE = True
+except:
+    WMI_AVAILABLE = False
+
+try:
+    import winreg
+    WINREG_AVAILABLE = True
+except:
+    WINREG_AVAILABLE = False
+
+try:
+    import win32api, win32con, win32process, win32security, pythoncom, win32com.client
+    from win32com.shell import shell, shellcon
+    WIN32_AVAILABLE = True
+    PYTHONCOM_AVAILABLE = True
+except:
+    WIN32_AVAILABLE = False
+    PYTHONCOM_AVAILABLE = False
+
+# ═══════════════════════════════════════════════════════════════════
+# КОНФИГУРАЦИЯ
+# ═══════════════════════════════════════════════════════════════════
+
+BOT_TOKEN = "Хуй тебе. Свой вставляй"
+SECRET_KEY = "HolyWorld2024Secret"
+ALPHABET = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+CODE_LIFETIME_MINUTES = 5
+
+CHECK_SITES = [
+    "anticheat.ac", "mods.holyworld.me", "github.com", "voidtools.com",
+    "privazer.com", "nirsoft.net", "sourceforge.net", 
+    "download.ericzimmermanstools.com", "win-rar.com", "simpleunlocker.ds1nc.ru"
+]
+
+REQUIRED_SERVICES = ["PcaSvc", "DPS", "SysMain", "EventLog", "bam"]
+
+EMBEDDED_VIDEO_BASE64 = "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAeJbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAJxAAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAABnZ0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAJxAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAwAAAAGwAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAACcQAAAEAAABAAAAAAXubWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAB9ABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAAFmW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAABVlzdGJsAAAA0XN0c2QAAAAAAAAAAQAAAMFhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAwABsABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP"
+USE_EMBEDDED_VIDEO = True
+
+# ═══════════════════════════════════════════════════════════════════
+# РАСШИРЕННЫЙ СПИСОК САЙТОВ ЧИТОВ
+# ═══════════════════════════════════════════════════════════════════
+
+BANNED_CHEAT_WEBSITES = [
+    "celestial.su", "celestial.wtf", "celestial.cc",
+    "nursultan.wtf", "nursultan.su", "nursultan.cc",
+    "akrien.su", "akrien.wtf", "akrien.cc",
+    "expensive.su", "expensive.wtf", "expensive.cc",
+    "neverhook.cc", "neverhook.su",
+    "deadcode.wtf", "deadcode.su", "deadcode.cc",
+    "extazyy.su", "extazyy.wtf", "extazyy.cc",
+    "thunderhack.net", "thunderhack.cc",
+    "rusherhack.net", "rusherhack.org", "rusherhack.cc",
+    "meteorclient.com", "meteorclient.net",
+    "aristois.net", "aristois.com",
+    "wurstclient.net", "wurst.wiki",
+    "liquidbounce.net", "liquidbounce.cc",
+    "novoline.wtf", "novoline.cc",
+    "vape.gg", "vape.cc", "vape.lol",
+    "intent.store", "intentstore.cc",
+    "rise.lat", "rise.lol", "riseclient.cc",
+    "drip.lat", "drip.lol",
+    "azura.best", "azura.cc",
+    "moon.lat", "moon.lol",
+    "tenacity.lol", "tenacity.cc",
+    "remix.cc", "remix.lol",
+    "flux.today", "flux.cc",
+    "entropy.club", "entropy.cc",
+    "unknowncheats.me", "unknowncheats.com",
+    "mpgh.net", "mpgh.org",
+    "blast.hk", "blasthack.net",
+    "yougame.biz", "yougame.cc",
+    "lolzteam.net", "lolz.guru", "lolz.live",
+    "zelenka.guru", "zelenka.cc",
+    "darkmoney.cc", "darkmoney.me",
+    "elitepvpers.com",
+    "nulled.to", "nulled.cc",
+    "cracked.io", "cracked.to",
+    "sinister.ly",
+    "hackforums.net",
+    "leakforums.co",
+    "sigma.info", "sigmaclient.info",
+    "koks.rip", "koks.club",
+    "fdp.today", "fdpclient.github.io",
+    "ketamine.wtf", "ketamine.su",
+    "xatz.cc", "xatz.lol",
+    "prestige.su", "prestige.wtf",
+    "blademc.su", "blademc.cc",
+    "zeroday.wtf", "zeroday.su",
+    "pandaware.cc", "pandaware.lol",
+    "ambien.su", "ambien.wtf",
+    "exhi.cc", "exhibition.lol",
+    "nightmare.cc", "nightmare.wtf",
+    "memeware.cc", "memeware.lol",
+    "augustus.lol", "augustus.cc",
+    "tap.cc", "tap.lol",
+    "hanabi.cc", "hanabi.lol",
+    "crypt.cc", "crypt.lol",
+    "jigsaw.wtf", "jigsaw.su",
+    "whiteout.lol", "whiteout.cc",
+    "cheatbreaker.download", 
+    "3arthh4ck.download",
+    "gopro336.xyz",
+    "selixe.cc",
+    "mc-cheats.net", "minecraft-hacks.net",
+    "minecrafthax.net", "minecraftcheats.net",
+    "cheating.pl", "cheating.md",
+    "spezz.xyz", "spezz.club",
+    "opsucht.net", "opsucht.de"
+]
+
+BANNED_WEBSITES = BANNED_CHEAT_WEBSITES
+
+# ═══════════════════════════════════════════════════════════════════
+# WINDOWS API
+# ═══════════════════════════════════════════════════════════════════
+
+PROCESS_QUERY_INFORMATION = 0x0400
+PROCESS_VM_READ = 0x0010
+MEM_COMMIT = 0x1000
+MEM_FREE = 0x10000
+MEM_RESERVE = 0x2000
+PAGE_NOACCESS = 0x01
+PAGE_GUARD = 0x100
+PAGE_READABLE = 0x02 | 0x04 | 0x20 | 0x40 | 0x80
+
+class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("BaseAddress", ctypes.c_void_p), ("AllocationBase", ctypes.c_void_p),
+        ("AllocationProtect", ctypes.wintypes.DWORD), ("RegionSize", ctypes.c_size_t),
+        ("State", ctypes.wintypes.DWORD), ("Protect", ctypes.wintypes.DWORD), ("Type", ctypes.wintypes.DWORD),
+    ]
+
+class MODULEINFO(ctypes.Structure):
+    _fields_ = [
+        ("lpBaseOfDll", ctypes.c_void_p),
+        ("SizeOfImage", ctypes.wintypes.DWORD),
+        ("EntryPoint", ctypes.c_void_p),
+    ]
+
+kernel32 = ctypes.windll.kernel32
+psapi = ctypes.windll.psapi
+ntdll = ctypes.windll.ntdll
+
+# ═══════════════════════════════════════════════════════════════════
+# БЕЛЫЙ СПИСОК
+# ═══════════════════════════════════════════════════════════════════
+
+SAFE_MODS = [
+    "optifine", "sodium", "lithium", "phosphor", "starlight", "iris", "indium",
+    "ferritecore", "lazydfu", "smoothboot", "entityculling", "enhanced_visuals",
+    "fabric", "fabricapi", "fabric-api", "forge", "modmenu", "mod-menu", "clothconfig",
+    "architectury", "iceberg", "puzzleslib", "balm", "bookshelf", "collective",
+    "jei", "justenoughitems", "rei", "roughlyenoughitems", "emi", "appleskin",
+    "journeymap", "xaero", "voxelmap", "minimap", "waila", "hwyla", "jade", "wthit",
+    "torohealth", "neat", "blur", "betterf3", "betterfps", "fps", "dynamic",
+    "controlling", "configured", "inventoryprofiles", "mousewheelie", "itemscroller",
+    "litematica", "schematica", "worldedit", "axiom",
+    "soundfilters", "dynamicsurroundings", "presencefootsteps", "soundphysics",
+    "lambdynamiclights", "continuity", "connected", "betterleaves",
+    "replaymod", "replay", "modularui", "catalogue",
+    "shulkerboxtooltip", "advancementinfo", "craftingtweaks",
+    "tlauncher", "lunar", "badlion", "labymod", "feather", "salwyrr",
+    "jna", "log4j", "netty", "gson", "guava", "commons", "lwjgl", "jinput",
+    "authlib", "patchy", "text2speech", "javafx", "jfx",
+    "topkavisuals", "visualplus", "hitcolor", "damagevisual", "chunkanimator",
+    "particleculling", "fpsreducer", "notenoughanimations"
+]
+
+SAFE_PATHS = [
+    "windows", "program files", "program files (x86)", "programdata",
+    "system32", "syswow64", "winsxs", "microsoft", "windowsapps",
+    "nvidia", "amd", "intel", "realtek", "steam", "epic games",
+    "java", "jdk", "jre", "eclipse", "jetbrains", "vscode", "visual studio",
+    "node_modules", ".git", "python", "anaconda", "gradle", "maven"
+]
+
+SAFE_DLLS = [
+    "ntdll.dll", "kernel32.dll", "kernelbase.dll", "user32.dll", "gdi32.dll",
+    "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll", "msvcrt.dll",
+    "comctl32.dll", "comdlg32.dll", "shlwapi.dll", "secur32.dll", "crypt32.dll",
+    "ws2_32.dll", "winmm.dll", "imm32.dll", "version.dll", "dbghelp.dll",
+    "msvcp", "vcruntime", "ucrtbase", "clrjit", "coreclr", "hostfxr",
+    "d3d11.dll", "d3d9.dll", "dxgi.dll", "opengl32.dll", "nvoglv64.dll",
+    "atio6axx.dll", "aticfx64.dll", "ig75icd64.dll",
+    "jimage.dll", "management.dll", "extnet.dll", "jvm.dll", "java.dll",
+    "awt.dll", "fontmanager.dll", "freetype.dll", "javajpeg.dll", "jawt.dll",
+    "jdwp.dll", "jsound.dll", "lcms.dll", "mlib_image.dll", "net.dll",
+    "nio.dll", "prefs.dll", "splashscreen.dll", "sunec.dll", "sunmscapi.dll",
+    "verify.dll", "zip.dll", "attach.dll", "instrument.dll",
+    "rpcrt4.dll", "sspicli.dll", "cryptbase.dll", "bcryptprimitives.dll",
+    "sechost.dll", "cfgmgr32.dll", "powrprof.dll", "profapi.dll", "setupapi.dll"
+]
+
+# ═══════════════════════════════════════════════════════════════════
+# СПИСОК ЧИТОВ
+# ═══════════════════════════════════════════════════════════════════
+
+BANNED_MODS = [
+    "akrien", "aristois", "armorhotswap", "arbuz", "atomic",
+    "baritone", "bedrockbreaker", "bleachhack", "betterhitreg",
+    "celestial", "celka", "chunkcopy", "cleancut", "clickcrystals", 
+    "crystaloptimizer", "cornos", "dauntiblyat", "deadcode", "diamondsim",
+    "doomsday", "doublehotbar", "dreampool", "elytraswap", "elytrahack",
+    "entityoutliner", "entityxray", "expensive", "exire", "extazyy",
+    "featherclient", "forgehax", "freecam", "fuzeclient", "fluger",
+    "gamesense", "hakari", "hush", "huzuni", "inertia", "invmove", "jex",
+    "konas", "kamiblue", "librariantradefinder", "liquidbounce", 
+    "meteor", "minced", "mobhitbox", "moonhack", "mathax",
+    "neverhook", "nightware", "nodus", "nurik", "nursultan", "novoline",
+    "phobos", "postman", "ricardo", "richclient", "rogalik", "rusherhack",
+    "sacurachorusfind", "savesearcher", "seedcracker", "skillclient", 
+    "swingthroughgrass", "salhack", "takker", "thunderhack", "topkaautobuy",
+    "troxill", "topkaautodrop", "vape", "venus", "vortex", "vec",
+    "wurst", "wildclient", "wexside", "wissend", "wolfram", "worlddownloader",
+    "xray", "zamorozka", "zeusclient", "zenithclient", "kernel64", "avalone", "blessed"
+]
+
+BANNED_MOD_FUNCTIONS = [
+    "killaura", "autoattack", "triggerbot", "aimassist", "hitbox",
+    "crystaloptimizer", "autocrystal", "autoclicker", "reach",
+    "velocity", "antikb", "antiknockback", "scaffold", "freecam",
+    "flight", "noclip", "nofall", "speed", "bhop", "bunnyhop"
+]
+
+# ═══════════════════════════════════════════════════════════════════
+# ДЕТЕКТЫ ДЛЯ MEMORY STRINGS (Minimum length: 4)
+# ═══════════════════════════════════════════════════════════════════
+
+MEMORY_STRING_DETECTS = [
+    b"ASM:", b"E S P", b"x/mo/c", b"b/time", b"chs/90",
+    b"Hitbox:", b"Reach:", b"cortex", b"blessed", b"by.kayn",
+    b"ZDCoder", b"BaoBab:", b"chs/Main", b"dreampool", b"TriggerBOT",
+    b"magicthein", b"chs/Profiler", b"radioegor146", b"Self Destruct",
+    b"stubborn.website",
+    b"H(q=Zf@wDLF?/d?D&", b"x/fC5K<;i/f6I-w[", b"SMe;8#xj0s<+pyE&bEZ",
+    b"cR_A^yvDVSXDYPQp]", b"r|~}Xnpo>]_^'@BA", b"WYX-gih>rssK{||[",
+    b"7ba{vsdkvhd}o}w", b"Hba{vsdkvhduy{q", b"Fba{vsdkvhdpxhz",
+    b"Aba{vsdkvhdnxhv", b"sjuuOiqotmus",
+    b"net/minecraft/client/renderer/RenderState$$Lambda",
+    b"net.minecraftforge.ASMEventHandler.31.wait(long, int)",
+    b"forge.commons.",
+]
+
+MEMORY_DETECT_REGEX_PATTERNS = [
+    rb"celestial[._]?(su|wtf|cc)",
+    rb"nursultan[._]?(su|wtf|cc)",
+    rb"expensive[._]?(su|wtf|cc)",
+    rb"akrien[._]?(su|wtf|cc)",
+    rb"KillAura\s*:",
+    rb"AutoCrystal\s*:",
+    rb"AimAssist\s*:",
+    rb"Velocity\s*:",
+    rb"AntiKB\s*:",
+]
+
+DPS_TIMESTAMP_DETECTS = [
+    b"2023/03/09:17:11:30", b"2023/07/03:22:01:11", b"2023/10/04:16:07:05",
+    b"2024/04/05:11:43:39", b"2025/05/28:23:57:12", b"2076/05/18:04:53:15",
+    b"2024/05/02:22:48", b"2024/09/06:09:35:50", b"2023/08/13:13:09:58",
+    b"2025/01/20:21:37:53", b"2025/01/16:14:21:21", b"2022/06/07:07:45:55",
+]
+
+BANNED_DLL_WEIGHTS = {
+    9385574: "inject hitbox (8.95 MB)",
+    9332736: "autobuy (8.9 MB)",
+    1614438: "inject hitbox (1.54 MB)",
+    1499136: "dauntiblyat.dll (1.43 MB)",
+    1488978: "inject hitbox (1.42 MB)",
+}
+DLL_WEIGHT_TOLERANCE = 10240
+
+ANTICHEAT_DOMAINS = ['easyanticheat', 'battleye', 'vanguard', 'faceit', 'esea']
+
+VM_PROCESSES = ["vmtoolsd.exe", "vmwaretray.exe", "vmwareuser.exe", "vboxservice.exe", "vboxtray.exe", "vmcompute.exe", "vmwp.exe"]
+VM_MAC_PREFIXES = ["00:0C:29", "00:50:56", "08:00:27", "00:15:5D", "52:54:00"]
+VM_REGISTRY_KEYS = [(r"SOFTWARE\VMware, Inc.\VMware Tools", "VMware"), (r"SOFTWARE\Oracle\VirtualBox Guest Additions", "VirtualBox"), (r"SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters", "Hyper-V")]
+VM_BIOS_STRINGS = ["vmware", "virtualbox", "vbox", "qemu", "hyper-v", "virtual"]
+
+SKIP_FOLDERS = {'windows', 'program files', 'program files (x86)', 'programdata', 'system volume information', 'windowsapps', 'winsxs', 'node_modules', '.git', '__pycache__', 'recovery', 'boot'}
+
+SUSPICIOUS_JAR_METHODS = ["setBoundingBox", "method_5857", "getDimensions", "func_174826_a", "m_20011_", "HitResult", "class_239", "EndCrystalEntity", "class_1511", "EnderCrystalEntity", "RayTraceResult", "EntityRayTraceResult", "EntityHitResult", "EndCrystal", "ItemStack", "class_1799", "bmb", "GetModuleHandleA", "jvm.dll", "ModuleName"]
+
+# ═══════════════════════════════════════════════════════════════════
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ═══════════════════════════════════════════════════════════════════
+
+def is_admin() -> bool:
+    try: return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except: return False
+
+def get_file_date(filepath: str) -> Optional[datetime.datetime]:
+    try: return datetime.datetime.fromtimestamp(os.stat(filepath).st_mtime)
+    except: return None
+
+def get_file_size(filepath: str) -> int:
+    try: return os.path.getsize(filepath)
+    except: return 0
+
+def is_within_14_days(date: Optional[datetime.datetime]) -> bool:
+    return date is not None and (datetime.datetime.now() - date).days < 14
+
+def is_within_7_days(date: Optional[datetime.datetime]) -> bool:
+    return date is not None and (datetime.datetime.now() - date).days < 7
+
+def is_safe_path(path: str) -> bool:
+    path_lower = path.lower()
+    for safe in SAFE_PATHS:
+        if safe in path_lower and '.minecraft' not in path_lower and 'minecraft' not in path_lower:
+            return True
+    return False
+
+def is_safe_mod(name: str) -> bool:
+    name_lower = name.lower()
+    return any(safe in name_lower for safe in SAFE_MODS)
+
+def is_safe_dll(name: str) -> bool:
+    name_lower = name.lower()
+    if any(safe in name_lower for safe in SAFE_DLLS): return True
+    if name_lower.startswith("java") or name_lower.startswith("jvm"): return True
+    return False
+
+def is_cheat_name(name: str) -> bool:
+    name_lower = name.lower().replace(' ', '').replace('-', '').replace('_', '')
+    if is_safe_mod(name_lower) or is_safe_dll(name_lower): return False
+    return any(cheat.replace(' ', '') in name_lower for cheat in BANNED_MODS)
+
+def is_banned_dll_size(size: int) -> Optional[str]:
+    for banned_size, description in BANNED_DLL_WEIGHTS.items():
+        if abs(size - banned_size) <= DLL_WEIGHT_TOLERANCE:
+            return description
+    return None
+
+def get_file_signature(filepath: str) -> Tuple[bool, str]:
+    try:
+        result = subprocess.run(['powershell', '-NoProfile', '-Command', f'(Get-AuthenticodeSignature "{filepath}").Status'], capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+        status = result.stdout.strip()
+        if status == "Valid": return True, "Signed"
+        elif status == "NotSigned": return False, "Not Signed"
+        return False, status if status else "Unknown"
+    except: return True, "Unknown"
+
+def get_gpu_info() -> str:
+    try:
+        if WMI_AVAILABLE:
+            c = wmi.WMI()
+            gpus = [gpu.Name for gpu in c.Win32_VideoController() if gpu.Name]
+            if gpus: return "; ".join(gpus)
+    except: pass
+    try:
+        output = subprocess.check_output('wmic path win32_VideoController get name', shell=True, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW).decode('utf-8', errors='ignore')
+        lines = [l.strip() for l in output.splitlines() if l.strip() and l.strip() != 'Name']
+        if lines: return "; ".join(lines)
+    except: pass
+    return "Unknown"
+
+def find_minecraft_folders() -> List[str]:
+    minecraft_paths = []
+    appdata = os.environ.get('APPDATA', '')
+    userprofile = os.path.expanduser('~')
+    standard_paths = [
+        os.path.join(appdata, '.minecraft'), os.path.join(appdata, '.tlauncher'),
+        os.path.join(appdata, '.feather'), os.path.join(appdata, '.lunarclient'),
+        os.path.join(appdata, 'PrismLauncher', 'instances'),
+        os.path.join(userprofile, 'curseforge', 'minecraft', 'Instances'),
+    ]
+    for drive in ['C:', 'D:', 'E:', 'F:']:
+        if os.path.exists(drive):
+            standard_paths.extend([os.path.join(drive, 'minecraft'), os.path.join(drive, '.minecraft')])
+    for path in standard_paths:
+        if os.path.exists(path) and os.path.isdir(path):
+            indicators = ['versions', 'mods', 'logs', 'saves', 'resourcepacks']
+            if sum(1 for ind in indicators if os.path.exists(os.path.join(path, ind))) >= 2 and path not in minecraft_paths:
+                minecraft_paths.append(path)
+    return minecraft_paths
+
+def base34_decode(encoded: str) -> int:
+    result = 0
+    for c in encoded:
+        if c not in ALPHABET: raise ValueError(f"Invalid character: {c}")
+        result = result * 34 + ALPHABET.index(c)
+    return result
+def base34_decode(encoded: str) -> int:
+    result = 0
+    for c in encoded:
+        if c not in ALPHABET:
+            raise ValueError(f"Invalid character: {c}")
+        result = result * 34 + ALPHABET.index(c)
+    return result
+
+
+def normalize_moderator_code(raw: str) -> str:
+    """
+    Нормализует код модератора:
+    - удаляет все, кроме [0-9 A-Z]
+    - переводит в верхний регистр
+    - заменяет похожие русские буквы на латиницу (А->A, В->B и т.п.)
+    """
+    if not raw:
+        return ""
+
+    s = raw.upper()
+
+    translit_map = str.maketrans({
+        "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M",
+        "Н": "H", "О": "O", "Р": "P", "С": "S", "Т": "T",
+        "У": "Y", "Х": "X",
+        "І": "I", "Ї": "I", "Й": "I",
+    })
+    s = s.translate(translit_map)
+
+    # оставляем только латинские буквы и цифры
+    s = re.sub(r"[^0-9A-Z]", "", s)
+    return s
+
+def decode_moderator_id(code: str) -> Tuple[bool, int, str]:
+    try:
+        # НОРМАЛИЗУЕМ КОД
+        code = normalize_moderator_code(code)
+
+        if len(code) != 12:
+            return False, 0, f"Format: {len(code)}"
+        uid_part, ts_part, checksum = code[:6], code[6:9], code[9:12]
+        for c in code:
+            if c not in ALPHABET: return False, 0, f"Char: {c}"
+        uid_partial, ts_partial = base34_decode(uid_part), base34_decode(ts_part)
+        current_ts = int(time.time() // 60)
+        ts_mask = 34 ** 3
+        current_ts_partial = current_ts % ts_mask
+        full_ts = (current_ts // ts_mask) * ts_mask + ts_partial if current_ts_partial >= ts_partial else ((current_ts // ts_mask) - 1) * ts_mask + ts_partial
+        age_minutes = current_ts - full_ts
+        if age_minutes < 0: age_minutes += ts_mask
+        if age_minutes > CODE_LIFETIME_MINUTES: return False, 0, f"Expired ({age_minutes} min)"
+        uid_mask = 34 ** 6
+        for prefix in range(11):
+            candidate_uid = prefix * uid_mask + uid_partial
+            if candidate_uid == 0: continue
+            check_data = f"{candidate_uid}:{full_ts}:{SECRET_KEY}"
+            check_hash = hashlib.sha256(check_data.encode()).hexdigest()
+            expected = "".join([ALPHABET[int(check_hash[i*2:(i*2)+2], 16) % 34] for i in range(3)])
+            if checksum == expected: return True, candidate_uid, f"OK ({CODE_LIFETIME_MINUTES - age_minutes} min)"
+        return False, 0, "Invalid code"
+    except Exception as e: return False, 0, f"Error: {e}"
+
+# ═══════════════════════════════════════════════════════════════════
+# EMBEDDED VIDEO PLAYER
+# ═══════════════════════════════════════════════════════════════════
+
+class EmbeddedVideoPlayer:
+    def __init__(self, parent, width=500, height=280):
+        self.parent, self.width, self.height = parent, width, height
+        self.cap, self.playing, self.frame_delay, self.temp_video_path = None, False, 33, None
+        self.label = tk.Label(parent, bg="#0a0a0f")
+        self.label.pack(pady=10)
+        if not self.load_embedded_video(): self.show_animation_placeholder()
+    
+    def load_embedded_video(self) -> bool:
+        if not CV2_AVAILABLE or not PIL_AVAILABLE: return False
+        if not USE_EMBEDDED_VIDEO or "ЗДЕСЬ" in EMBEDDED_VIDEO_BASE64: return False
+        try:
+            video_data = base64.b64decode(EMBEDDED_VIDEO_BASE64)
+            self.temp_video_path = os.path.join(tempfile.gettempdir(), f"holy_video_{int(time.time())}.mp4")
+            with open(self.temp_video_path, 'wb') as f: f.write(video_data)
+            self.cap = cv2.VideoCapture(self.temp_video_path)
+            if not self.cap.isOpened(): return False
+            fps = self.cap.get(cv2.CAP_PROP_FPS)
+            if fps > 0: self.frame_delay = int(1000 / fps)
+            self.playing = True
+            self.update_frame()
+            return True
+        except: return False
+    
+    def show_animation_placeholder(self):
+        self.animation_frame = 0
+        self.animation_colors = ["#7c3aed", "#8b5cf6", "#a78bfa", "#8b5cf6"]
+        self.animate_placeholder()
+    
+    def animate_placeholder(self):
+        if not self.playing:
+            color = self.animation_colors[self.animation_frame % len(self.animation_colors)]
+            dots = "." * ((self.animation_frame % 4) + 1)
+            self.label.config(text=f"🛡️ HOLYWORLD CHECKER 🛡️\n\n⚡ Сканирование{dots}\n\n🔍 Поиск нарушений...", fg=color, font=("Segoe UI", 16, "bold"), width=40, height=10, bg="#0a0a0f")
+            self.animation_frame += 1
+            self.parent.after(500, self.animate_placeholder)
+    
+    def update_frame(self):
+        if not self.playing or not self.cap: return
+        ret, frame = self.cap.read()
+        if not ret:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = self.cap.read()
+            if not ret: return
+        try:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = cv2.resize(frame, (self.width, self.height))
+            img = Image.fromarray(frame)
+            photo = ImageTk.PhotoImage(image=img)
+            self.label.config(image=photo, text="")
+            self.label.image = photo
+        except: pass
+        if self.playing: self.parent.after(self.frame_delay, self.update_frame)
+    
+    def start(self):
+        self.playing = True
+        if self.cap: self.update_frame()
+        else: self.animate_placeholder()
+    
+    def stop(self):
+        self.playing = False
+        if self.cap: self.cap.release(); self.cap = None
+        if self.temp_video_path and os.path.exists(self.temp_video_path):
+            try: os.remove(self.temp_video_path)
+            except: pass
+    
+    def destroy(self):
+        self.stop()
+        if self.label: self.label.destroy()
+
+# ═══════════════════════════════════════════════════════════════════
+# CHEAT SITES CHECKER (ВСЕ БРАУЗЕРЫ)
+# ═══════════════════════════════════════════════════════════════════
+
+class CheatSitesChecker:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_dns_cache(self) -> List[Dict]:
+        found = []
+        try:
+            result = subprocess.run(['ipconfig', '/displaydns'], capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+            output = result.stdout.lower()
+            for site in BANNED_CHEAT_WEBSITES:
+                if site in output:
+                    found.append({'type': 'DNS Cache', 'site': site, 'severity': 'CRITICAL'})
+                    self.log(f"   [!!!] DNS: {site}")
+        except: pass
+        return found
+    
+    def check_browser_history_chrome(self) -> List[Dict]:
+        found = []
+        localappdata = os.environ.get('LOCALAPPDATA', '')
+        for path in [os.path.join(localappdata, r'Google\Chrome\User Data\Default\History'), os.path.join(localappdata, r'Google\Chrome\User Data\Profile 1\History')]:
+            if not os.path.exists(path): continue
+            try:
+                temp_file = os.path.join(tempfile.gettempdir(), f'chrome_{int(time.time())}')
+                shutil.copy2(path, temp_file)
+                conn = sqlite3.connect(temp_file)
+                cursor = conn.cursor()
+                cursor.execute("SELECT url, title FROM urls ORDER BY last_visit_time DESC LIMIT 10000")
+                for row in cursor.fetchall():
+                    url, title = row[0].lower(), (row[1] or '').lower()
+                    for site in BANNED_CHEAT_WEBSITES:
+                        if site in url or site in title:
+                            found.append({'type': 'Chrome', 'site': site, 'url': url[:100], 'severity': 'CRITICAL'})
+                            break
+                conn.close(); os.remove(temp_file)
+            except: pass
+        return found
+    
+    def check_browser_history_edge(self) -> List[Dict]:
+        found = []
+        path = os.path.join(os.environ.get('LOCALAPPDATA', ''), r'Microsoft\Edge\User Data\Default\History')
+        if not os.path.exists(path): return found
+        try:
+            temp_file = os.path.join(tempfile.gettempdir(), f'edge_{int(time.time())}')
+            shutil.copy2(path, temp_file)
+            conn = sqlite3.connect(temp_file)
+            cursor = conn.cursor()
+            cursor.execute("SELECT url, title FROM urls ORDER BY last_visit_time DESC LIMIT 10000")
+            for row in cursor.fetchall():
+                url = row[0].lower()
+                for site in BANNED_CHEAT_WEBSITES:
+                    if site in url:
+                        found.append({'type': 'Edge', 'site': site, 'severity': 'CRITICAL'})
+                        break
+            conn.close(); os.remove(temp_file)
+        except: pass
+        return found
+    
+    def check_browser_history_firefox(self) -> List[Dict]:
+        found = []
+        firefox_profiles = os.path.join(os.environ.get('APPDATA', ''), r'Mozilla\Firefox\Profiles')
+        if not os.path.exists(firefox_profiles): return found
+        try:
+            for profile in os.listdir(firefox_profiles):
+                places_path = os.path.join(firefox_profiles, profile, 'places.sqlite')
+                if os.path.exists(places_path):
+                    try:
+                        temp_file = os.path.join(tempfile.gettempdir(), f'ff_{int(time.time())}')
+                        shutil.copy2(places_path, temp_file)
+                        conn = sqlite3.connect(temp_file)
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT url FROM moz_places ORDER BY last_visit_date DESC LIMIT 10000")
+                        for row in cursor.fetchall():
+                            url = row[0].lower()
+                            for site in BANNED_CHEAT_WEBSITES:
+                                if site in url:
+                                    found.append({'type': 'Firefox', 'site': site, 'severity': 'CRITICAL'})
+                                    break
+                        conn.close(); os.remove(temp_file)
+                    except: pass
+        except: pass
+        return found
+    
+    def check_browser_history_opera(self) -> List[Dict]:
+        found = []
+        appdata = os.environ.get('APPDATA', '')
+        for path in [os.path.join(appdata, r'Opera Software\Opera Stable\History'), os.path.join(appdata, r'Opera Software\Opera GX Stable\History')]:
+            if not os.path.exists(path): continue
+            try:
+                temp_file = os.path.join(tempfile.gettempdir(), f'opera_{int(time.time())}')
+                shutil.copy2(path, temp_file)
+                conn = sqlite3.connect(temp_file)
+                cursor = conn.cursor()
+                cursor.execute("SELECT url, title FROM urls ORDER BY last_visit_time DESC LIMIT 10000")
+                for row in cursor.fetchall():
+                    url = row[0].lower()
+                    for site in BANNED_CHEAT_WEBSITES:
+                        if site in url:
+                            found.append({'type': 'Opera', 'site': site, 'severity': 'CRITICAL'})
+                            break
+                conn.close(); os.remove(temp_file)
+            except: pass
+        return found
+    
+    def check_browser_history_yandex(self) -> List[Dict]:
+        found = []
+        path = os.path.join(os.environ.get('LOCALAPPDATA', ''), r'Yandex\YandexBrowser\User Data\Default\History')
+        if not os.path.exists(path): return found
+        try:
+            temp_file = os.path.join(tempfile.gettempdir(), f'yandex_{int(time.time())}')
+            shutil.copy2(path, temp_file)
+            conn = sqlite3.connect(temp_file)
+            cursor = conn.cursor()
+            cursor.execute("SELECT url, title FROM urls ORDER BY last_visit_time DESC LIMIT 10000")
+            for row in cursor.fetchall():
+                url = row[0].lower()
+                for site in BANNED_CHEAT_WEBSITES:
+                    if site in url:
+                        found.append({'type': 'Yandex', 'site': site, 'severity': 'CRITICAL'})
+                        break
+            conn.close(); os.remove(temp_file)
+        except: pass
+        return found
+    
+    def check_downloads_folder(self) -> List[Dict]:
+        found = []
+        downloads = os.path.join(os.path.expanduser('~'), 'Downloads')
+        if not os.path.exists(downloads): return found
+        try:
+            for file in os.listdir(downloads):
+                file_lower = file.lower()
+                for site in BANNED_CHEAT_WEBSITES:
+                    if site.split('.')[0] in file_lower:
+                        filepath = os.path.join(downloads, file)
+                        if is_within_14_days(get_file_date(filepath)):
+                            found.append({'type': 'Downloads', 'site': site, 'filename': file[:80], 'severity': 'CRITICAL'})
+                            break
+        except: pass
+        return found
+    
+    def check_all(self) -> List[Dict]:
+        self.log("   [*] Checking cheat websites...")
+        all_found = []
+        all_found.extend(self.check_dns_cache())
+        all_found.extend(self.check_browser_history_chrome())
+        all_found.extend(self.check_browser_history_edge())
+        all_found.extend(self.check_browser_history_firefox())
+        all_found.extend(self.check_browser_history_opera())
+        all_found.extend(self.check_browser_history_yandex())
+        all_found.extend(self.check_downloads_folder())
+        seen = set()
+        unique = []
+        for item in all_found:
+            key = f"{item['type']}_{item['site']}"
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        self.log(f"   [+] Found {len(unique)} cheat site visits")
+        return unique
+
+# ═══════════════════════════════════════════════════════════════════
+# SERVICES MANAGER
+# ═══════════════════════════════════════════════════════════════════
+
+class ServicesManager:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_and_start_services(self) -> List[Dict]:
+        results = []
+        if not is_admin():
+            self.log("   [!] Admin rights required")
+            return results
+        self.log("   [*] Checking services...")
+        cmd = "sc config PcaSvc start= auto & sc start PcaSvc & sc config DPS start= auto & sc start DPS & sc config SysMain start= auto & sc start SysMain & sc config EventLog start= auto & sc start EventLog & sc config bam start= auto & sc start bam"
+        try:
+            subprocess.run(cmd, shell=True, capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+            for service in REQUIRED_SERVICES:
+                result = subprocess.run(['sc', 'query', service], capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+                status = 'Running' if 'RUNNING' in result.stdout else 'Stopped'
+                results.append({'service': service, 'status': status})
+        except: pass
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# SITE BLOCKING CHECKER
+# ═══════════════════════════════════════════════════════════════════
+
+class SiteBlockingChecker:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_sites(self) -> List[Dict]:
+        results = []
+        self.log("   [*] Checking site blocking...")
+        sites_str = '","'.join(CHECK_SITES)
+        ps_script = r'''$sites = @("''' + sites_str + r'''")
+function Test-Site($u) { $r = @(); $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+if (Test-Path $hostsPath) { $hostsContent = Get-Content $hostsPath -EA SilentlyContinue
+foreach ($line in $hostsContent) { if ($line -match "^\s*\d" -and $line -match [regex]::Escape($u)) { $r += "HOSTS"; break } } }
+try { $dns = Resolve-DnsName $u -EA Stop -Type A; foreach ($record in $dns) { if ($record.IPAddress -like "127.*" -or $record.IPAddress -eq "0.0.0.0") { $r += "DNS_LOOPBACK"; break } } } catch {}
+if ($r.Count -gt 0) { Write-Output "BLOCKED:$u|$($r -join ',')" } }
+foreach ($site in $sites) { Test-Site $site }'''
+        try:
+            result = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script], capture_output=True, text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('BLOCKED:'):
+                    parts = line[8:].split('|')
+                    if len(parts) >= 2:
+                        results.append({'type': 'Site Blocked', 'site': parts[0], 'methods': parts[1], 'severity': 'CRITICAL'})
+                        self.log(f"   [!!!] BLOCKED: {parts[0]}")
+        except: pass
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# JAVAW PROCESS DETECTOR
+# ═══════════════════════════════════════════════════════════════════
+
+class JavawProcessDetector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def find_all_javaw(self) -> List[Dict]:
+        javaw_processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'exe']):
+            try:
+                info = proc.info
+                if 'java' in (info.get('name') or '').lower():
+                    javaw_processes.append({'pid': info['pid'], 'name': info['name'], 'cmdline': info.get('cmdline') or [], 'exe': info.get('exe') or ''})
+            except: continue
+        return javaw_processes
+    
+    def find_minecraft_javaw(self) -> Optional[Dict]:
+        all_javaw = self.find_all_javaw()
+        for javaw in all_javaw:
+            cmdline = ' '.join(javaw.get('cmdline') or []).lower()
+            if any(kw in cmdline for kw in ['minecraft', '.minecraft', 'tlauncher', 'lunar', 'badlion', 'labymod', 'feather']):
+                return javaw
+        return all_javaw[0] if all_javaw else None
+
+# ═══════════════════════════════════════════════════════════════════
+# NETWORK BYPASS DETECTOR
+# ═══════════════════════════════════════════════════════════════════
+
+class NetworkBypassDetector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_javaw_connections(self) -> List[Dict]:
+        results = []
+        bypass_pattern = re.compile(r'^192\.168\.\d+\.\d+$')
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = proc.info['name'].lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                if 'java' in name and ('minecraft' in cmdline or '.minecraft' in cmdline):
+                    try: connections = proc.net_connections(kind='inet')
+                    except: connections = proc.connections(kind='inet')
+                    for conn in connections:
+                        if conn.raddr and bypass_pattern.match(conn.raddr.ip):
+                            results.append({'type': 'Network Bypass', 'pid': proc.info['pid'], 'remote_ip': conn.raddr.ip, 'remote_port': conn.raddr.port, 'status': conn.status, 'severity': 'CRITICAL'})
+                            self.log(f"   [!!!] BYPASS: {conn.raddr.ip}")
+            except: continue
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# LOADED MODULES SCANNER (вкладка Modules)
+# ═══════════════════════════════════════════════════════════════════
+
+class LoadedModulesScanner:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def get_modules_with_info(self, pid: int) -> List[Dict]:
+        modules = []
+        ps_script = f'''$ErrorActionPreference = 'SilentlyContinue'
+$process = Get-Process -Id {pid} -EA SilentlyContinue
+if ($process) {{ $process.Modules | ForEach-Object {{
+$size = $_.ModuleMemorySize; $name = $_.ModuleName; $path = $_.FileName; $desc = ""
+try {{ $desc = (Get-Item $path -EA SilentlyContinue).VersionInfo.FileDescription }} catch {{}}
+Write-Output "MODULE|$name|$path|$size|$desc" }} }}'''
+        try:
+            result = subprocess.run(['powershell', '-NoProfile', '-Command', ps_script], capture_output=True, text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('MODULE|'):
+                    parts = line.split('|')
+                    if len(parts) >= 5:
+                        modules.append({'name': parts[1], 'path': parts[2], 'size': int(parts[3]) if parts[3].isdigit() else 0, 'description': parts[4].strip()})
+        except: pass
+        return modules
+    
+    def scan_javaw_modules(self) -> Dict:
+        results = {'banned_weight': [], 'no_description': [], 'suspicious': []}
+        javaw_pid = None
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = (proc.info['name'] or '').lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                if 'java' in name and ('minecraft' in cmdline or '.minecraft' in cmdline):
+                    javaw_pid = proc.info['pid']
+                    self.log(f"   [*] Found javaw.exe (PID: {javaw_pid})")
+                    break
+            except: continue
+        if not javaw_pid:
+            self.log("   [!] javaw.exe not found")
+            return results
+        modules = self.get_modules_with_info(javaw_pid)
+        self.log(f"   [*] Found {len(modules)} loaded modules")
+        for mod in modules:
+            name, size, path, desc = mod['name'].lower(), mod['size'], mod['path'].lower(), mod['description']
+            if is_safe_dll(name) or is_safe_path(path): continue
+            banned = is_banned_dll_size(size)
+            if banned:
+                results['banned_weight'].append({'name': mod['name'], 'path': mod['path'], 'size': size, 'size_mb': round(size/1024/1024, 2), 'reason': banned, 'severity': 'CRITICAL'})
+                self.log(f"   [!!!] BANNED WEIGHT: {mod['name']} ({round(size/1024/1024, 2)} MB)")
+            if (not desc or desc.strip() == '') and banned:
+                results['no_description'].append({'name': mod['name'], 'path': mod['path'], 'size': size, 'reason': f"No Description + {banned}", 'severity': 'CRITICAL'})
+            if is_cheat_name(name):
+                results['suspicious'].append({'name': mod['name'], 'path': mod['path'], 'reason': 'Cheat name', 'severity': 'CRITICAL'})
+                self.log(f"   [!!!] CHEAT NAME: {mod['name']}")
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# MODULES DESCRIPTION SCANNER (Modules без Description)
+# ═══════════════════════════════════════════════════════════════════
+
+class ModulesDescriptionScanner:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def get_file_description(self, filepath: str) -> str:
+        try:
+            if WIN32_AVAILABLE:
+                info = win32api.GetFileVersionInfo(filepath, '\\StringFileInfo\\040904B0\\FileDescription')
+                return info if info else ""
+        except: pass
+        try:
+            result = subprocess.run(['powershell', '-Command', f'(Get-Item "{filepath}").VersionInfo.FileDescription'], capture_output=True, text=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+            return result.stdout.strip()
+        except: pass
+        return ""
+    
+    def scan_modules_without_description(self, pid: int) -> List[Dict]:
+        results = []
+        try:
+            proc = psutil.Process(pid)
+            for dll in proc.memory_maps():
+                if dll.path.lower().endswith('.dll'):
+                    dll_name = os.path.basename(dll.path).lower()
+                    if is_safe_dll(dll_name) or is_safe_path(dll.path): continue
+                    description = self.get_file_description(dll.path)
+                    if not description:
+                        size = get_file_size(dll.path)
+                        banned = is_banned_dll_size(size)
+                        if any(java_dll in dll_name for java_dll in ['jimage', 'management', 'extnet', 'java', 'jvm']): continue
+                        if banned:
+                            results.append({'type': 'No Description + Banned Size', 'name': os.path.basename(dll.path), 'path': dll.path, 'size': size, 'reason': banned, 'severity': 'CRITICAL'})
+                        elif is_cheat_name(dll_name):
+                            results.append({'type': 'No Description + Cheat Name', 'name': os.path.basename(dll.path), 'path': dll.path, 'size': size, 'severity': 'HIGH'})
+        except: pass
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# UNLOADED MODULES SCANNER (Miscellaneous → Unloaded modules)
+# ═══════════════════════════════════════════════════════════════════
+
+class UnloadedModulesScanner:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def get_unloaded_modules(self, pid: int) -> List[Dict]:
+        modules = []
+        try:
+            h_process = kernel32.OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                False,
+                pid
+            )
+            if not h_process:
+                return modules
+            try:
+                address, mbi = 0, MEMORY_BASIC_INFORMATION()
+                max_address = 0x7FFFFFFFFFFF if ctypes.sizeof(ctypes.c_void_p) == 8 else 0x7FFFFFFF
+                dll_pattern = re.compile(rb'[A-Za-z]:\\[^\x00]{10,200}\.dll', re.IGNORECASE)
+                found_paths, regions = set(), 0
+
+                while address < max_address and regions < 1000:
+                    if not kernel32.VirtualQueryEx(
+                        h_process,
+                        ctypes.c_void_p(address),
+                        ctypes.byref(mbi),
+                        ctypes.sizeof(mbi)
+                    ):
+                        break
+
+                    if (
+                        mbi.State == MEM_COMMIT and
+                        mbi.RegionSize > 0 and
+                        mbi.RegionSize < 20*1024*1024
+                    ):
+                        if (
+                            mbi.Protect and
+                            not (mbi.Protect & PAGE_NOACCESS) and
+                            not (mbi.Protect & PAGE_GUARD)
+                        ):
+                            try:
+                                buffer = ctypes.create_string_buffer(min(mbi.RegionSize, 5*1024*1024))
+                                bytes_read = ctypes.c_size_t()
+                                if kernel32.ReadProcessMemory(
+                                    h_process,
+                                    ctypes.c_void_p(mbi.BaseAddress),
+                                    buffer,
+                                    len(buffer),
+                                    ctypes.byref(bytes_read)
+                                ):
+                                    for match in dll_pattern.findall(buffer.raw[:bytes_read.value]):
+                                        try:
+                                            path = match.decode('utf-8', errors='ignore')
+                                            if path not in found_paths:
+                                                found_paths.add(path)
+                                                exists = os.path.exists(path)
+                                                modules.append({
+                                                    'name': os.path.basename(path),
+                                                    'path': path,
+                                                    'size': get_file_size(path) if exists else 0,
+                                                    'exists': exists
+                                                })
+                                        except:
+                                            pass
+                            except:
+                                pass
+
+                    # безопасный шаг
+                    base = mbi.BaseAddress if mbi.BaseAddress is not None else 0
+                    size = mbi.RegionSize if getattr(mbi, "RegionSize", None) else 0
+                    address = base + size
+                    regions += 1
+            finally:
+                kernel32.CloseHandle(h_process)
+        except:
+            pass
+        return modules
+    
+    def scan_javaw_unloaded(self) -> Dict:
+        results = {'banned_weight': [], 'suspicious': [], 'deleted': []}
+        javaw_pid = None
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = (proc.info['name'] or '').lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                if 'java' in name and ('minecraft' in cmdline or '.minecraft' in cmdline):
+                    javaw_pid = proc.info['pid']
+                    self.log(f"   [*] Scanning unloaded modules (PID: {javaw_pid})")
+                    break
+            except:
+                continue
+
+        if not javaw_pid:
+            return results
+
+        modules = self.get_unloaded_modules(javaw_pid)
+        self.log(f"   [*] Found {len(modules)} DLL paths in memory")
+
+        for mod in modules:
+            name = mod['name'].lower()
+            path = mod.get('path', '').lower()
+            size = mod.get('size', 0)
+            exists = mod.get('exists', True)
+
+            if is_safe_dll(name) or is_safe_path(path):
+                continue
+
+            banned = is_banned_dll_size(size) if size > 0 else None
+            if banned:
+                results['banned_weight'].append({
+                    'name': mod['name'],
+                    'path': mod.get('path', 'Unknown'),
+                    'size': size,
+                    'size_mb': round(size/1024/1024, 2),
+                    'reason': banned,
+                    'exists': exists,
+                    'severity': 'CRITICAL'
+                })
+                self.log(f"   [!!!] UNLOADED BANNED: {mod['name']}")
+
+            if not exists and is_cheat_name(name):
+                results['deleted'].append({
+                    'name': mod['name'],
+                    'path': mod.get('path', 'Unknown'),
+                    'reason': 'Deleted',
+                    'severity': 'CRITICAL'
+                })
+                self.log(f"   [!!!] DELETED: {mod['name']}")
+            elif is_cheat_name(name):
+                results['suspicious'].append({
+                    'name': mod['name'],
+                    'path': mod.get('path', 'Unknown'),
+                    'reason': 'Cheat name',
+                    'severity': 'CRITICAL'
+                })
+        return results
+		# ═══════════════════════════════════════════════════════════════════
+# MEMORY STRINGS SCANNER (FIXED: UTF-16 + case-insensitive)
+# ═══════════════════════════════════════════════════════════════════
+
+class MemoryStringsScanner:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+        self.compiled_regex = [re.compile(p, re.IGNORECASE) for p in MEMORY_DETECT_REGEX_PATTERNS]
+    
+    def log(self, msg: str):
+        self.log_callback(msg)
+
+    def _extract_string_ascii(self, data: bytes, idx: int, max_len: int = 200) -> str:
+        """Извлекает ASCII строку вокруг вхождения"""
+        start, end = idx, idx
+        while start > 0 and (end - start) < max_len:
+            b = data[start - 1]
+            if b == 0 or (b < 32 and b not in (9, 10, 13)):
+                break
+            start -= 1
+        n = len(data)
+        while end < n and (end - start) < max_len:
+            b = data[end]
+            if b == 0 or (b < 32 and b not in (9, 10, 13)):
+                break
+            end += 1
+        return data[start:end].decode('utf-8', errors='ignore')
+
+    def _extract_string_utf16(self, data: bytes, idx: int, max_len: int = 400) -> str:
+        """Извлекает UTF-16 LE строку вокруг вхождения (как Java хранит строки)"""
+        # Выравниваем на чётный адрес
+        if idx % 2 != 0:
+            idx -= 1
+        
+        start, end = idx, idx
+        n = len(data)
+        
+        # Идём влево по 2 байта
+        while start >= 2 and (end - start) < max_len:
+            wchar = data[start - 2] | (data[start - 1] << 8)
+            if wchar == 0 or (wchar < 32 and wchar not in (9, 10, 13)):
+                break
+            if wchar > 127:  # Не ASCII — стоп
+                break
+            start -= 2
+        
+        # Идём вправо по 2 байта
+        while end + 2 <= n and (end - start) < max_len:
+            wchar = data[end] | (data[end + 1] << 8)
+            if wchar == 0 or (wchar < 32 and wchar not in (9, 10, 13)):
+                break
+            if wchar > 127:
+                break
+            end += 2
+        
+        try:
+            return data[start:end].decode('utf-16-le', errors='ignore')
+        except:
+            return ""
+
+    def _create_search_variants(self, pattern: bytes) -> List[tuple]:
+        """
+        Создаёт ВСЕ варианты паттерна для поиска:
+        - ASCII: lowercase, UPPERCASE, Title
+        - UTF-16 LE: lowercase, UPPERCASE, Title
+        """
+        variants = []
+        try:
+            text = pattern.decode('utf-8')
+            
+            # ASCII варианты
+            variants.append((text.lower().encode('ascii', errors='ignore'), 'ascii'))
+            variants.append((text.upper().encode('ascii', errors='ignore'), 'ascii'))
+            variants.append((text.title().encode('ascii', errors='ignore'), 'ascii'))
+            
+            # UTF-16 LE варианты (КАК JAVA ХРАНИТ СТРОКИ!)
+            variants.append((text.lower().encode('utf-16-le'), 'utf16'))
+            variants.append((text.upper().encode('utf-16-le'), 'utf16'))
+            variants.append((text.title().encode('utf-16-le'), 'utf16'))
+            
+        except:
+            variants.append((pattern, 'ascii'))
+        
+        # Убираем дубликаты
+        seen = set()
+        unique = []
+        for p, enc in variants:
+            if p and p not in seen:
+                seen.add(p)
+                unique.append((p, enc))
+        
+        return unique
+
+    def search_single_pattern(
+        self,
+        h_process: int,
+        pattern: bytes,
+        max_regions: int = 10000,
+        max_results: int = 50
+    ) -> List[Dict]:
+        """
+        Ищет паттерн во ВСЕХ форматах: ASCII + UTF-16 LE, case-insensitive.
+        """
+        found: List[Dict] = []
+        mbi = MEMORY_BASIC_INFORMATION()
+        max_address = 0x7FFFFFFFFFFF if ctypes.sizeof(ctypes.c_void_p) == 8 else 0x7FFFFFFF
+
+        if len(pattern) < 3:
+            return found
+
+        # Создаём все варианты паттерна (ASCII + UTF-16, разные регистры)
+        search_variants = self._create_search_variants(pattern)
+        found_results = set()  # Для дедупликации
+        
+        address = 0
+        regions = 0
+
+        while address < max_address and regions < max_regions and len(found) < max_results:
+            if not kernel32.VirtualQueryEx(
+                h_process,
+                ctypes.c_void_p(address),
+                ctypes.byref(mbi),
+                ctypes.sizeof(mbi)
+            ):
+                break
+
+            can_read = (
+                mbi.State == MEM_COMMIT and
+                mbi.RegionSize > 0 and
+                mbi.RegionSize < 100 * 1024 * 1024 and
+                mbi.Protect != 0 and
+                not (mbi.Protect & PAGE_NOACCESS) and
+                not (mbi.Protect & PAGE_GUARD)
+            )
+
+            if can_read:
+                try:
+                    buf_size = min(mbi.RegionSize, 50 * 1024 * 1024)
+                    buffer = ctypes.create_string_buffer(buf_size)
+                    bytes_read = ctypes.c_size_t()
+                    
+                    if kernel32.ReadProcessMemory(
+                        h_process,
+                        ctypes.c_void_p(mbi.BaseAddress),
+                        buffer,
+                        len(buffer),
+                        ctypes.byref(bytes_read)
+                    ):
+                        data = buffer.raw[:bytes_read.value]
+                        
+                        # Ищем КАЖДЫЙ вариант паттерна
+                        for search_pat, encoding in search_variants:
+                            if len(found) >= max_results:
+                                break
+                            
+                            pos = 0
+                            while len(found) < max_results:
+                                idx = data.find(search_pat, pos)
+                                if idx == -1:
+                                    break
+
+                                # Извлекаем полную строку в зависимости от кодировки
+                                if encoding == 'utf16':
+                                    result_str = self._extract_string_utf16(data, idx)
+                                else:
+                                    result_str = self._extract_string_ascii(data, idx)
+
+                                # Дедупликация
+                                result_key = result_str.lower().strip()[:100]
+                                if result_key and len(result_key) >= 3 and result_key not in found_results:
+                                    found_results.add(result_key)
+                                    
+                                    base = mbi.BaseAddress if mbi.BaseAddress else 0
+                                    addr_val = base + idx
+
+                                    found.append({
+                                        'pattern': pattern.decode('utf-8', errors='ignore'),
+                                        'result': result_str,
+                                        'address': hex(addr_val),
+                                        'encoding': encoding,
+                                        'found': True
+                                    })
+
+                                pos = idx + len(search_pat)
+                                
+                except Exception:
+                    pass
+
+            # Переход к следующему региону
+            base = mbi.BaseAddress if mbi.BaseAddress else 0
+            size = mbi.RegionSize if mbi.RegionSize else 0x1000
+            address = base + size
+            regions += 1
+
+        return found
+
+    def scan_process_memory(self, pid: int) -> List[Dict]:
+        results: List[Dict] = []
+        self.log(f"   [*] Opening javaw.exe (PID: {pid}) for memory scan...")
+        
+        try:
+            h_process = kernel32.OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                False,
+                pid
+            )
+            if not h_process:
+                self.log(f"   [!] Cannot open process {pid}")
+                return results
+
+            try:
+                # ═══════════════════════════════════════════════════════
+                # ПРЯМЫЕ СТРОКОВЫЕ ПАТТЕРНЫ (ASCII + UTF-16)
+                # ═══════════════════════════════════════════════════════
+                total = len(MEMORY_STRING_DETECTS)
+                self.log(f"   [*] Searching {total} patterns (ASCII + UTF-16, case-insensitive)...")
+                
+                for i, pattern in enumerate(MEMORY_STRING_DETECTS):
+                    matches = self.search_single_pattern(h_process, pattern)
+                    
+                    if matches:
+                        for m in matches:
+                            results.append({
+                                'type': 'Memory String',
+                                'pattern': m.get('pattern', ''),
+                                'result': m.get('result', ''),
+                                'pid': pid,
+                                'address': m.get('address', 'N/A'),
+                                'encoding': m.get('encoding', 'unknown'),
+                                'severity': 'CRITICAL',
+                            })
+                        # Логируем первый результат
+                        first_result = matches[0].get('result', '')[:80]
+                        enc = matches[0].get('encoding', '')
+                        self.log(f"   [!!!] FOUND [{enc}] '{pattern.decode(errors='ignore')}': {first_result}")
+                    
+                    # Прогресс каждые 10 паттернов
+                    if (i + 1) % 10 == 0:
+                        self.log(f"   [*] Progress: {i+1}/{total}")
+                
+                self.log(f"   [+] String patterns complete: {len(results)} found")
+
+                # ═══════════════════════════════════════════════════════
+                # REGEX ПАТТЕРНЫ
+                # ═══════════════════════════════════════════════════════
+                self.log(f"   [*] Checking {len(self.compiled_regex)} regex patterns...")
+                
+                address = 0
+                mbi = MEMORY_BASIC_INFORMATION()
+                max_address = 0x7FFFFFFFFFFF if ctypes.sizeof(ctypes.c_void_p) == 8 else 0x7FFFFFFF
+                regions = 0
+                found_regex = set()
+
+                while address < max_address and regions < 5000:
+                    if not kernel32.VirtualQueryEx(
+                        h_process,
+                        ctypes.c_void_p(address),
+                        ctypes.byref(mbi),
+                        ctypes.sizeof(mbi)
+                    ):
+                        break
+
+                    if (
+                        mbi.State == MEM_COMMIT and
+                        mbi.RegionSize > 0 and
+                        mbi.RegionSize < 50 * 1024 * 1024 and
+                        mbi.Protect and
+                        not (mbi.Protect & PAGE_NOACCESS) and
+                        not (mbi.Protect & PAGE_GUARD)
+                    ):
+                        try:
+                            buffer = ctypes.create_string_buffer(min(mbi.RegionSize, 20 * 1024 * 1024))
+                            bytes_read = ctypes.c_size_t()
+                            
+                            if kernel32.ReadProcessMemory(
+                                h_process,
+                                ctypes.c_void_p(mbi.BaseAddress),
+                                buffer,
+                                len(buffer),
+                                ctypes.byref(bytes_read)
+                            ):
+                                data = buffer.raw[:bytes_read.value]
+                                
+                                for regex in self.compiled_regex:
+                                    for match in regex.findall(data):
+                                        match_str = (
+                                            match.decode('utf-8', errors='ignore')
+                                            if isinstance(match, bytes)
+                                            else str(match)
+                                        )
+                                        if match_str and match_str not in found_regex:
+                                            found_regex.add(match_str)
+                                            base = mbi.BaseAddress if mbi.BaseAddress else 0
+                                            
+                                            results.append({
+                                                'type': 'Memory Regex',
+                                                'pattern': regex.pattern.decode(errors='ignore') if isinstance(regex.pattern, bytes) else str(regex.pattern),
+                                                'result': match_str,
+                                                'pid': pid,
+                                                'address': hex(base),
+                                                'severity': 'CRITICAL'
+                                            })
+                                            self.log(f"   [!!!] REGEX: {match_str[:60]}")
+                        except:
+                            pass
+
+                    base = mbi.BaseAddress if mbi.BaseAddress else 0
+                    size = mbi.RegionSize if mbi.RegionSize else 0x1000
+                    address = base + size
+                    regions += 1
+
+            finally:
+                kernel32.CloseHandle(h_process)
+                
+        except Exception as e:
+            self.log(f"   [!] Memory scan error: {str(e)[:80]}")
+            
+        self.log(f"   [+] Total memory detects: {len(results)}")
+        return results
+
+    def scan_all_javaw(self) -> List[Dict]:
+        all_results: List[Dict] = []
+        self.log("   [*] Searching for Minecraft Java processes...")
+        
+        found_process = False
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = (proc.info['name'] or '').lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                
+                if 'java' in name and any(
+                    kw in cmdline
+                    for kw in ['minecraft', '.minecraft', 'tlauncher', 'lunar', 'badlion', 'labymod', 'feather']
+                ):
+                    found_process = True
+                    self.log(f"   [*] Found Minecraft: {proc.info['name']} (PID: {proc.info['pid']})")
+                    all_results.extend(self.scan_process_memory(proc.info['pid']))
+            except:
+                continue
+
+        if not found_process:
+            self.log("   [!] No Minecraft Java process found!")
+
+        if all_results:
+            self.log(f"   [+] === TOTAL MEMORY DETECTS: {len(all_results)} ===")
+            for i, r in enumerate(all_results[:25], 1):
+                res = r.get('result') or r.get('pattern') or ''
+                enc = r.get('encoding', 'regex')
+                self.log(f"   [{i}] [{enc}] {res[:100]}")
+        else:
+            self.log("   [+] No cheat signatures detected in memory")
+            
+        return all_results
+# ═══════════════════════════════════════════════════════════════════
+# DPS SERVICE SCANNER
+# ═══════════════════════════════════════════════════════════════════
+
+class DPSServiceScanner:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def find_dps_pid(self) -> Optional[int]:
+        try:
+            result = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 "(Get-WmiObject Win32_Service -Filter \"Name='DPS'\").ProcessId"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.stdout.strip().isdigit():
+                return int(result.stdout.strip())
+        except:
+            pass
+        return None
+    
+    def scan_dps_memory(self) -> List[Dict]:
+        results = []
+        dps_pid = self.find_dps_pid()
+        if not dps_pid:
+            self.log("   [!] DPS service not found")
+            return results
+
+        self.log(f"   [*] Found DPS service (PID: {dps_pid})")
+        try:
+            h_process = kernel32.OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                False,
+                dps_pid
+            )
+            if not h_process:
+                return results
+
+            try:
+                address, mbi = 0, MEMORY_BASIC_INFORMATION()
+                max_address = 0x7FFFFFFFFFFF if ctypes.sizeof(ctypes.c_void_p) == 8 else 0x7FFFFFFF
+                exe_pattern = re.compile(rb'[A-Za-z]:\\[^\x00\x01\x02]{10,200}\.exe', re.IGNORECASE)
+                found_paths, regions = set(), 0
+
+                while address < max_address and regions < 500:
+                    if not kernel32.VirtualQueryEx(
+                        h_process,
+                        ctypes.c_void_p(address),
+                        ctypes.byref(mbi),
+                        ctypes.sizeof(mbi)
+                    ):
+                        break
+
+                    if (
+                        mbi.State == MEM_COMMIT and
+                        mbi.Protect and
+                        not (mbi.Protect & PAGE_NOACCESS) and
+                        mbi.RegionSize < 20*1024*1024
+                    ):
+                        try:
+                            buffer = ctypes.create_string_buffer(min(mbi.RegionSize, 5*1024*1024))
+                            bytes_read = ctypes.c_size_t()
+                            if kernel32.ReadProcessMemory(
+                                h_process,
+                                ctypes.c_void_p(mbi.BaseAddress),
+                                buffer,
+                                len(buffer),
+                                ctypes.byref(bytes_read)
+                            ):
+                                data = buffer.raw[:bytes_read.value]
+                                for match in exe_pattern.findall(data):
+                                    path = match.decode('utf-8', errors='ignore')
+                                    if path not in found_paths and len(path) > 10:
+                                        found_paths.add(path)
+                                for ts in DPS_TIMESTAMP_DETECTS:
+                                    if ts in data:
+                                        results.append({
+                                            'type': 'DPS Timestamp',
+                                            'value': ts.decode('utf-8', errors='ignore'),
+                                            'severity': 'HIGH'
+                                        })
+                                        self.log(f"   [!] DPS Timestamp: {ts.decode(errors='ignore')}")
+                        except:
+                            pass
+
+                    # безопасный шаг по адресному пространству
+                    base = mbi.BaseAddress if mbi.BaseAddress is not None else 0
+                    size = mbi.RegionSize if getattr(mbi, "RegionSize", None) else 0
+                    address = base + size
+                    regions += 1
+
+                for path in found_paths:
+                    if is_cheat_name(path) and not is_safe_path(path):
+                        exists = os.path.exists(path)
+                        results.append({
+                            'type': 'DPS Exe Path',
+                            'path': path,
+                            'exists': exists,
+                            'severity': 'CRITICAL' if not exists else 'HIGH'
+                        })
+                        self.log(
+                            f"   [!!!] DPS Path: {os.path.basename(path)} "
+                            f"({'EXISTS' if exists else 'DELETED'})"
+                        )
+            finally:
+                kernel32.CloseHandle(h_process)
+        except Exception as e:
+            self.log(f"   [!] DPS scan error: {str(e)[:50]}")
+        return results
+		# ═══════════════════════════════════════════════════════════════════
+# CSRSS PATHS PARSER
+# ═══════════════════════════════════════════════════════════════════
+
+class CsrssPathsParser:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def find_csrss_processes(self) -> List[int]:
+        pids = []
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                if proc.info['name'].lower() == 'csrss.exe': pids.append(proc.info['pid'])
+            except: continue
+        return pids
+    
+    def extract_paths_from_csrss(self, pid: int) -> List[str]:
+        paths = []
+        path_regex = re.compile(rb'[A-Za-z]:\\.+?(?=\x00|\s)', re.IGNORECASE)
+        try:
+            h_process = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
+            if not h_process: return paths
+            try:
+                address, mbi, regions = 0, MEMORY_BASIC_INFORMATION(), 0
+                max_address = 0x7FFFFFFFFFFF if ctypes.sizeof(ctypes.c_void_p) == 8 else 0x7FFFFFFF
+                while address < max_address and regions < 300:
+                    if not kernel32.VirtualQueryEx(h_process, ctypes.c_void_p(address), ctypes.byref(mbi), ctypes.sizeof(mbi)): break
+                    if mbi.State == MEM_COMMIT and mbi.Protect and not (mbi.Protect & PAGE_NOACCESS) and mbi.RegionSize < 5*1024*1024:
+                        try:
+                            buffer = ctypes.create_string_buffer(min(mbi.RegionSize, 2*1024*1024))
+                            bytes_read = ctypes.c_size_t()
+                            if kernel32.ReadProcessMemory(h_process, ctypes.c_void_p(mbi.BaseAddress), buffer, len(buffer), ctypes.byref(bytes_read)):
+                                for p in path_regex.findall(buffer.raw[:bytes_read.value]):
+                                    try:
+                                        path_str = p.decode('utf-8', errors='ignore')
+                                        if len(path_str) > 10 and path_str not in paths: paths.append(path_str)
+                                    except: pass
+                        except: pass
+                    address = mbi.BaseAddress + mbi.RegionSize
+                    regions += 1
+            finally: kernel32.CloseHandle(h_process)
+        except: pass
+        return paths[:500]
+    
+    def analyze_paths(self) -> List[Dict]:
+        results = []
+        for pid in self.find_csrss_processes():
+            self.log(f"   [*] Parsing csrss.exe PID: {pid}")
+            for path in self.extract_paths_from_csrss(pid):
+                path_lower = path.lower()
+                if is_safe_path(path_lower): continue
+                if path_lower.endswith('.dll'):
+                    dll_name = os.path.basename(path_lower)
+                    if is_safe_dll(dll_name): continue
+                    if os.path.exists(path):
+                        size = get_file_size(path)
+                        banned = is_banned_dll_size(size)
+                        if banned or is_cheat_name(dll_name):
+                            results.append({'type': 'Csrss Path', 'path': path, 'name': dll_name, 'exists': True, 'size': size, 'banned_size': banned, 'severity': 'CRITICAL' if banned else 'HIGH'})
+                    elif is_cheat_name(dll_name):
+                        results.append({'type': 'Csrss Deleted', 'path': path, 'name': dll_name, 'exists': False, 'severity': 'HIGH'})
+        return results[:30]
+
+# ═══════════════════════════════════════════════════════════════════
+# USB FLASH DRIVE DETECTOR
+# ═══════════════════════════════════════════════════════════════════
+
+class USBFlashDetector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def get_usb_history(self) -> List[Dict]:
+        usb_devices = []
+        if not WINREG_AVAILABLE: return usb_devices
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Enum\USBSTOR") as key:
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        device_class = winreg.EnumKey(key, i)
+                        with winreg.OpenKey(key, device_class) as device_key:
+                            for j in range(winreg.QueryInfoKey(device_key)[0]):
+                                try:
+                                    device_id = winreg.EnumKey(device_key, j)
+                                    usb_devices.append({'class': device_class, 'id': device_id})
+                                except: continue
+                    except: continue
+        except: pass
+        return usb_devices
+    
+    def get_last_usb_disconnect_time(self) -> Optional[datetime.datetime]:
+        try:
+            ps_script = r'''Get-WinEvent -LogName System -FilterXPath "*[System[Provider[@Name='Microsoft-Windows-DriverFrameworks-UserMode'] and (EventID=2101 or EventID=2102)]]" -MaxEvents 1 -EA SilentlyContinue | ForEach-Object { $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss') }'''
+            result = subprocess.run(['powershell', '-NoProfile', '-Command', ps_script], capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            if result.stdout.strip(): return datetime.datetime.strptime(result.stdout.strip(), '%Y-%m-%d %H:%M:%S')
+        except: pass
+        return None
+    
+    def get_recent_usb_activity(self) -> List[Dict]:
+        results = []
+        try:
+            ps_script = r'''Get-WinEvent -LogName System -FilterXPath "*[System[Provider[@Name='Microsoft-Windows-DriverFrameworks-UserMode'] and (EventID=2003 or EventID=2100 or EventID=2101)]]" -MaxEvents 50 -EA SilentlyContinue | ForEach-Object { "$($_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))|$($_.Id)" }'''
+            result = subprocess.run(['powershell', '-NoProfile', '-Command', ps_script], capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in result.stdout.strip().split('\n'):
+                if '|' in line:
+                    parts = line.split('|')
+                    try:
+                        timestamp = datetime.datetime.strptime(parts[0], '%Y-%m-%d %H:%M:%S')
+                        if is_within_7_days(timestamp): results.append({'timestamp': timestamp, 'event_id': parts[1] if len(parts) > 1 else ""})
+                    except: pass
+        except: pass
+        return results
+    
+    def check_flash_drive_usage(self) -> List[Dict]:
+        results = []
+        usb_activity = self.get_recent_usb_activity()
+        last_disconnect = self.get_last_usb_disconnect_time()
+        if usb_activity:
+            results.append({'type': 'USB Activity', 'count': len(usb_activity), 'last_activity': usb_activity[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if usb_activity else 'Unknown', 'last_disconnect': last_disconnect.strftime('%Y-%m-%d %H:%M:%S') if last_disconnect else 'Unknown', 'severity': 'MEDIUM'})
+            self.log(f"   [*] USB activity: {len(usb_activity)} events, last disconnect: {last_disconnect.strftime('%Y-%m-%d %H:%M:%S') if last_disconnect else 'Unknown'}")
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# JAR MOD ANALYZER
+# ═══════════════════════════════════════════════════════════════════
+
+class JarModAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+        self.suspicious_patterns = [b"setBoundingBox", b"method_5857", b"getDimensions", b"func_174826_a", b"HitResult", b"EndCrystalEntity", b"EntityHitResult", b"GetModuleHandleA", b"jvm.dll", b"ModuleName", b"KillAura", b"AutoAttack", b"Freecam", b"TriggerBot", b"AimAssist", b"Reach", b"Velocity", b"NoFall", b"Flight", b"Scaffold", b"AntiKnockback"]
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def analyze_jar(self, jar_path: str) -> Dict:
+        result = {'path': jar_path, 'name': os.path.basename(jar_path), 'suspicious_methods': [], 'cheat_classes': [], 'is_obfuscated': False, 'jvm_injection': False, 'severity': 'CLEAN'}
+        if is_safe_mod(os.path.basename(jar_path)): return result
+        try:
+            with zipfile.ZipFile(jar_path, 'r') as jar:
+                class_count, obfuscated_count = 0, 0
+                for name in jar.namelist():
+                    if name.endswith('.class'):
+                        class_count += 1
+                        class_name = os.path.basename(name)
+                        if len(class_name) <= 3 or re.match(r'^[a-zA-Z]{1,2}\.class$', class_name): obfuscated_count += 1
+                        try:
+                            content = jar.read(name)
+                            for pattern in self.suspicious_patterns:
+                                if pattern in content:
+                                    pattern_str = pattern.decode('utf-8', errors='ignore')
+                                    if pattern_str not in result['suspicious_methods']: result['suspicious_methods'].append(pattern_str)
+                            if b"jvm.dll" in content and b"GetModuleHandleA" in content: result['jvm_injection'] = True
+                            for cheat in BANNED_MOD_FUNCTIONS:
+                                if cheat.lower().encode() in content.lower() and cheat not in result['cheat_classes']: result['cheat_classes'].append(cheat)
+                        except: continue
+                if class_count > 0 and obfuscated_count / class_count > 0.5:
+                    if not any(cm in os.path.basename(jar_path).lower() for cm in ['visual', 'hitcolor', 'damage', 'topka']): result['is_obfuscated'] = True
+                if result['jvm_injection']: result['severity'] = 'CRITICAL'
+                elif result['cheat_classes']: result['severity'] = 'CRITICAL'
+                elif len(result['suspicious_methods']) >= 3: result['severity'] = 'HIGH'
+                elif result['is_obfuscated']: result['severity'] = 'MEDIUM'
+        except: pass
+        return result
+    
+    def scan_mods_folder(self, minecraft_path: str) -> List[Dict]:
+        results = []
+        mods_path = os.path.join(minecraft_path, 'mods')
+        if not os.path.exists(mods_path): return results
+        try:
+            for file in os.listdir(mods_path):
+                if file.lower().endswith('.jar'):
+                    jar_path = os.path.join(mods_path, file)
+                    if is_safe_mod(file): continue
+                    if is_cheat_name(file):
+                        results.append({'name': file, 'severity': 'CRITICAL', 'path': jar_path})
+                        self.log(f"   [!!!] CHEAT MOD: {file}")
+                        continue
+                    analysis = self.analyze_jar(jar_path)
+                    if analysis['severity'] != 'CLEAN':
+                        results.append(analysis)
+                        if analysis['severity'] in ['CRITICAL', 'HIGH']: self.log(f"   [!!!] SUSPICIOUS MOD: {file}")
+        except: pass
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# JUMPLIST ANALYZER
+# ═══════════════════════════════════════════════════════════════════
+
+class JumpListAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def analyze_jumplists(self) -> List[Dict]:
+        results = []
+        appdata = os.environ.get('APPDATA', '')
+        auto_dest = os.path.join(appdata, r'Microsoft\Windows\Recent\AutomaticDestinations')
+        custom_dest = os.path.join(appdata, r'Microsoft\Windows\Recent\CustomDestinations')
+        path_pattern = re.compile(rb'[A-Za-z]:\\[^\x00]{5,200}\.(?:exe|dll|jar|zip|rar)', re.IGNORECASE)
+        all_paths = []
+        for dest_path in [auto_dest, custom_dest]:
+            if os.path.exists(dest_path):
+                try:
+                    for file in os.listdir(dest_path):
+                        try:
+                            with open(os.path.join(dest_path, file), 'rb') as f:
+                                for p in path_pattern.findall(f.read()):
+                                    try:
+                                        path = p.decode('utf-8', errors='ignore')
+                                        if path not in all_paths: all_paths.append(path)
+                                    except: pass
+                        except: pass
+                except: pass
+        for path in all_paths:
+            path_lower = path.lower()
+            filename = os.path.basename(path_lower)
+            if is_safe_path(path_lower) or is_safe_mod(filename): continue
+            if is_cheat_name(filename):
+                results.append({'type': 'JumpList', 'path': path, 'filename': filename, 'exists': os.path.exists(path), 'severity': 'CRITICAL'})
+                self.log(f"   [!!!] JumpList: {filename}")
+            elif filename.endswith('.dll') and os.path.exists(path):
+                banned = is_banned_dll_size(get_file_size(path))
+                if banned: results.append({'type': 'JumpList DLL', 'path': path, 'filename': filename, 'reason': banned, 'severity': 'CRITICAL'})
+        return results[:30]
+
+# ═══════════════════════════════════════════════════════════════════
+# REGISTRY CLEANING DETECTOR
+# ═══════════════════════════════════════════════════════════════════
+
+class RegistryCleaningDetector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_mrulistex_deletion(self) -> List[Dict]:
+        results = []
+        if not WINREG_AVAILABLE: return results
+        try:
+            ps_script = r'''$ErrorActionPreference = 'SilentlyContinue'
+$recentDocs = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs" -Name MRUListEx -EA SilentlyContinue
+if (-not $recentDocs) { Write-Output "DELETED:RecentDocs\MRUListEx" }
+$runMru = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU" -Name MRUList -EA SilentlyContinue
+if (-not $runMru) { Write-Output "DELETED:RunMRU\MRUList" }
+$comDlg = Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSavePidlMRU"
+if (-not $comDlg) { Write-Output "DELETED:ComDlg32\OpenSavePidlMRU" }'''
+            result = subprocess.run(['powershell', '-NoProfile', '-Command', ps_script], capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('DELETED:'):
+                    key_name = line.replace('DELETED:', '')
+                    results.append({'type': 'Registry Cleaning', 'key': key_name, 'severity': 'CRITICAL'})
+                    self.log(f"   [!!!] REGISTRY CLEANED: {key_name}")
+        except: pass
+        return results
+    
+    def check_userassist_cleaning(self) -> List[Dict]:
+        results = []
+        if not WINREG_AVAILABLE: return results
+        guids = ["{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}", "{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}"]
+        for guid in guids:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\{guid}\Count") as key:
+                    if winreg.QueryInfoKey(key)[1] < 5:
+                        results.append({'type': 'UserAssist Cleaning', 'guid': guid, 'severity': 'HIGH'})
+            except FileNotFoundError:
+                results.append({'type': 'UserAssist Missing', 'guid': guid, 'severity': 'CRITICAL'})
+            except: pass
+        return results
+    
+    def check_shellbag_cleaning(self) -> List[Dict]:
+        results = []
+        try:
+            ps_script = r'''$ErrorActionPreference = 'SilentlyContinue'
+$bags = Test-Path "Registry::HKEY_CLASSES_ROOT\Local Settings\Software\Microsoft\Windows\Shell\Bags"
+$bagMru = Test-Path "Registry::HKEY_CLASSES_ROOT\Local Settings\Software\Microsoft\Windows\Shell\BagMRU"
+if (-not $bags) { Write-Output "MISSING:Bags" }
+if (-not $bagMru) { Write-Output "MISSING:BagMRU" }
+if ($bags) { $c = (Get-ChildItem "Registry::HKEY_CLASSES_ROOT\Local Settings\Software\Microsoft\Windows\Shell\Bags" -EA SilentlyContinue).Count; if ($c -lt 3) { Write-Output "LOWCOUNT:Bags:$c" } }'''
+            result = subprocess.run(['powershell', '-NoProfile', '-Command', ps_script], capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('MISSING:'): results.append({'type': 'ShellBag Cleaning', 'key': line.replace('MISSING:', ''), 'severity': 'CRITICAL'})
+                elif line.startswith('LOWCOUNT:'): results.append({'type': 'ShellBag Low Count', 'key': line.split(':')[1], 'count': line.split(':')[2], 'severity': 'HIGH'})
+        except: pass
+        return results
+    
+    def check_all(self) -> List[Dict]:
+        results = []
+        results.extend(self.check_mrulistex_deletion())
+        results.extend(self.check_userassist_cleaning())
+        results.extend(self.check_shellbag_cleaning())
+        return results
+
+# ═══════════════════════════════════════════════════════════════════
+# PREFETCH USB ANALYZER
+# ═══════════════════════════════════════════════════════════════════
+
+class PrefetchUSBAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+        self.prefetch_path = os.path.expandvars(r"%SystemRoot%\Prefetch")
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_usb_launches(self) -> List[Dict]:
+        results = []
+        if not os.path.exists(self.prefetch_path): return results
+        try:
+            for file in os.listdir(self.prefetch_path):
+                if not file.upper().endswith('.PF'): continue
+                filepath = os.path.join(self.prefetch_path, file)
+                file_date = get_file_date(filepath)
+                if not is_within_7_days(file_date): continue
+                try:
+                    with open(filepath, 'rb') as f:
+                        content = f.read()
+                    if b'\\VOLUME' in content.upper():
+                        exe_name = file.rsplit('-', 1)[0].lower() if '-' in file else file.lower()
+                        severity = 'CRITICAL' if is_cheat_name(exe_name) else 'MEDIUM'
+                        results.append({'type': 'Prefetch USB', 'prefetch_file': file, 'exe_name': exe_name, 'date': file_date.strftime('%Y-%m-%d %H:%M') if file_date else 'Unknown', 'severity': severity})
+                        if severity == 'CRITICAL': self.log(f"   [!!!] USB Launch: {exe_name}")
+                except: pass
+        except: pass
+        return results[:20]
+
+# ═══════════════════════════════════════════════════════════════════
+# BAM ANALYZER
+# ═══════════════════════════════════════════════════════════════════
+
+class BAMAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def check_bam(self) -> List[Dict]:
+        results = []
+        if not WINREG_AVAILABLE: return results
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings") as key:
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    sid = winreg.EnumKey(key, i)
+                    with winreg.OpenKey(key, sid) as subkey:
+                        for j in range(winreg.QueryInfoKey(subkey)[1]):
+                            name, _, _ = winreg.EnumValue(subkey, j)
+                            if is_cheat_name(name.lower()) and not is_safe_path(name.lower()):
+                                results.append({'type': 'BAM', 'path': name, 'severity': 'CRITICAL'})
+                                self.log(f"   [!!!] BAM: {os.path.basename(name)}")
+        except: pass
+        return results
+    
+    def check_bam_unsigned(self) -> List[Dict]:
+        results = []
+        if not WINREG_AVAILABLE: return results
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings") as key:
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        sid = winreg.EnumKey(key, i)
+                        with winreg.OpenKey(key, sid) as subkey:
+                            for j in range(winreg.QueryInfoKey(subkey)[1]):
+                                try:
+                                    name, _, _ = winreg.EnumValue(subkey, j)
+                                    if is_safe_path(name.lower()) or not name.lower().endswith('.exe'): continue
+                                    if os.path.exists(name):
+                                        is_signed, sig_status = get_file_signature(name)
+                                        if not is_signed or sig_status == "Not Signed":
+                                            filename = os.path.basename(name)
+                                            if not is_safe_mod(filename):
+                                                results.append({'type': 'BAM Unsigned', 'path': name, 'filename': filename, 'status': sig_status, 'exists': True, 'severity': 'HIGH'})
+                                    else:
+                                        filename = os.path.basename(name)
+                                        if is_cheat_name(filename):
+                                            results.append({'type': 'BAM Deleted', 'path': name, 'filename': filename, 'exists': False, 'severity': 'CRITICAL'})
+                                            self.log(f"   [!!!] BAM Deleted: {filename}")
+                                except: continue
+                    except: continue
+        except: pass
+        return results[:30]
+
+# ═══════════════════════════════════════════════════════════════════
+# TWINKS COLLECTOR
+# ═══════════════════════════════════════════════════════════════════
+
+class TwinksCollector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def collect_twinks(self, minecraft_path: str) -> Tuple[Set[str], Dict]:
+        twinks, system_info = set(), {}
+        mc_path_escaped = minecraft_path.replace('\\', '\\\\')
+        ps_script = r'''$ErrorActionPreference = "SilentlyContinue"
+$mcPath = "''' + mc_path_escaped + r'''"
+$mac = (Get-NetAdapter -Physical | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1).MacAddress
+Write-Output "SYSINFO:Model:$((Get-WmiObject Win32_ComputerSystem).Model)"
+Write-Output "SYSINFO:BIOS:$((Get-WmiObject Win32_BIOS).SerialNumber)"
+Write-Output "SYSINFO:MAC:$mac"
+Write-Output "SYSINFO:Disk:$((Get-WmiObject Win32_DiskDrive | ForEach-Object { $_.Model }) -join ', ')"
+Write-Output "SYSINFO:BootTime:$((Get-CimInstance Win32_OperatingSystem).LastBootUpTime)"
+$virtualDevices = (Get-WmiObject Win32_PnPEntity | Where-Object {$_.Name -match 'VMware|Virtual|VBox|Hyper-V|QEMU'}).Name -join ', '
+if ($virtualDevices) { Write-Output "SYSINFO:Virtual:$virtualDevices" }
+Get-ChildItem -Path $mcPath -Recurse -Include *.log,*.log.gz -EA SilentlyContinue | ForEach-Object {
+    try { if ($_.Extension -eq '.gz') {
+        $stream = [System.IO.Compression.GzipStream]::new([System.IO.File]::OpenRead($_.FullName), [System.IO.Compression.CompressionMode]::Decompress)
+        $reader = [System.IO.StreamReader]::new($stream)
+        while (-not $reader.EndOfStream) { $line = $reader.ReadLine(); if ($line -match 'setting user:\s*(.+)$') { Write-Output "TWINK:$($matches[1].Trim())" } }
+        $reader.Close()
+    } else { Get-Content $_.FullName | Where-Object { $_ -match 'setting user:\s*(.+)$' } | ForEach-Object { Write-Output "TWINK:$($matches[1].Trim())" } } } catch {}
+}
+if (Test-Path "$mcPath\usercache.json") { try { Get-Content "$mcPath\usercache.json" -Raw | ConvertFrom-Json | Select-Object -ExpandProperty name | ForEach-Object { Write-Output "TWINK:$_" } } catch {} }
+if (Test-Path "$mcPath\TlauncherProfiles.json") { try { $json = Get-Content "$mcPath\TlauncherProfiles.json" -Raw | ConvertFrom-Json; $json.accounts.PSObject.Properties.Value | Select-Object -Expand username | ForEach-Object { Write-Output "TWINK:$_" } } catch {} }
+@("$mcPath\LabyMod\accounts.json", "$mcPath\labymod-neo\accounts.json") | ForEach-Object { if (Test-Path $_) { try { $json = Get-Content $_ -Raw | ConvertFrom-Json; $json.accounts.PSObject.Properties.Value.username | ForEach-Object { Write-Output "TWINK:$_" } } catch {} } }
+Get-ChildItem -Path $mcPath -Recurse -Filter ias.json -EA SilentlyContinue | ForEach-Object { try { $json = Get-Content $_.FullName -Raw | ConvertFrom-Json; if ($json.accounts) { $json.accounts | ForEach-Object { if ($_.name) { Write-Output "TWINK:$($_.name)" } elseif ($_.data.username) { Write-Output "TWINK:$($_.data.username)" } } } } catch {} }
+@("$env:APPDATA\.lunarclient", "$env:APPDATA\lunarclient") | ForEach-Object { if (Test-Path $_) { Get-ChildItem $_ -Recurse -Filter *.json -EA SilentlyContinue | ForEach-Object { try { $content = Get-Content $_.FullName -Raw; if ($content -match '"username"\s*:\s*"([^"]+)"') { Write-Output "TWINK:$($matches[1])" }; if ($content -match '"displayName"\s*:\s*"([^"]+)"') { Write-Output "TWINK:$($matches[1])" } } catch {} } } }
+if (Test-Path "$mcPath\usernamecache.json") { try { $json = Get-Content "$mcPath\usernamecache.json" -Raw | ConvertFrom-Json; $json.PSObject.Properties.Value | ForEach-Object { Write-Output "TWINK:$_" } } catch {} }
+@("PcaSvc", "DPS", "SysMain", "EventLog", "bam") | ForEach-Object { $svc = Get-Service $_ -EA SilentlyContinue; if ($svc) { $startType = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$_" -Name Start -EA SilentlyContinue).Start; $typeName = switch($startType) { 2 {"Auto"} 3 {"Manual"} 4 {"Disabled"} default {"Unknown"} }; Write-Output "SERVICE:$_`:$($svc.Status):$typeName" } }
+Get-WinEvent -LogName System -FilterXPath "*[System[(EventID=104)]]" -MaxEvents 10 -EA SilentlyContinue | ForEach-Object { Write-Output "EVENT104:$($_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))" }'''
+        try:
+            result = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps_script], capture_output=True, text=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('TWINK:'):
+                    name = line[6:].strip()
+                    if name and 3 <= len(name) <= 16 and re.match(r'^[a-zA-Z0-9_]+$', name): twinks.add(name)
+                elif line.startswith('SYSINFO:'):
+                    parts = line[8:].split(':', 1)
+                    if len(parts) == 2: system_info[parts[0]] = parts[1]
+                elif line.startswith('SERVICE:'):
+                    if 'services' not in system_info: system_info['services'] = []
+                    system_info['services'].append(line[8:])
+                elif line.startswith('EVENT104:'):
+                    if 'event104' not in system_info: system_info['event104'] = []
+                    system_info['event104'].append(line[9:])
+        except Exception as e: self.log(f"   [!] PowerShell error: {str(e)[:30]}")
+        return twinks, system_info
+
+# ═══════════════════════════════════════════════════════════════════
+# DELETED FILES DETECTOR — ПОЛНАЯ РАБОЧАЯ ВЕРСИЯ (2025)
+# Точно определяет очистку корзины + удалённые читы
+# ═══════════════════════════════════════════════════════════════════
+
+import os
+import subprocess
+import datetime
+from typing import List, Dict, Optional
+import win32security  # pip install pywin32
+import ctypes
+
+
+class DeletedFilesDetector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str):
+        self.log_callback(msg)
+
+    # ──────────────────────────────────────────────────────────────
+    # ТОЧНОЕ ОПРЕДЕЛЕНИЕ ДАТЫ ОЧИСТКИ КОРЗИНЫ (по mtime папки $Recycle.Bin)
+    # ──────────────────────────────────────────────────────────────
+    def get_last_recycle_bin_clear_time(self) -> Optional[datetime.datetime]:
+        latest_clear_time = None
+        drives_to_check = ['C:', 'D:', 'E:', 'F:', 'G:', 'H:', 'I:']
+
+        for drive in drives_to_check:
+            recycle_root = os.path.join(drive + os.sep, '$Recycle.Bin')
+            if not os.path.exists(recycle_root):
+                continue
+            
+            try:
+                mtime = os.path.getmtime(recycle_root)
+                clear_time = datetime.datetime.fromtimestamp(mtime)
+                
+                if latest_clear_time is None or clear_time > latest_clear_time:
+                    latest_clear_time = clear_time
+                    
+            except (PermissionError, OSError, FileNotFoundError):
+                continue
+
+        if latest_clear_time:
+            days_ago = (datetime.datetime.now() - latest_clear_time).days
+            self.log(f"   [i] Последняя очистка корзины: {latest_clear_time.strftime('%Y-%m-%d %H:%M:%S')} "
+                     f"({days_ago} дн. назад)")
+        
+        return latest_clear_time
+
+    # ──────────────────────────────────────────────────────────────
+    # Сканирование корзины (только последние 14 дней + подозрительные имена)
+    # ──────────────────────────────────────────────────────────────
+    def scan_recycle_bin(self) -> List[Dict]:
+        results = []
+        last_clear_time = self.get_last_recycle_bin_clear_time()
+
+        # Добавляем факт очистки корзины
+        if last_clear_time:
+            days_ago = (datetime.datetime.now() - last_clear_time).days
+            if days_ago <= 14:
+                severity = 'CRITICAL' if days_ago <= 2 else 'HIGH' if days_ago <= 7 else 'MEDIUM'
+                results.append({
+                    'type': 'Recycle Bin Cleared',
+                    'filename': f'Корзина очищена ({days_ago} дн. назад)',
+                    'date': last_clear_time.strftime('%Y-%m-%d'),
+                    'severity': severity
+                })
+                self.log(f"   [!!!] КОРЗИНА БЫЛА ОЧИЩЕНА {days_ago} ДНЕЙ НАЗАД!")
+
+        # Сканируем содержимое корзины
+        for drive in ['C:', 'D:', 'E:', 'F:', 'G:']:
+            recycle_path = os.path.join(drive + os.sep, '$Recycle.Bin')
+            if not os.path.exists(recycle_path):
+                continue
+
+            try:
+                for sid_folder in os.listdir(recycle_path):
+                    sid_path = os.path.join(recycle_path, sid_folder)
+                    if not os.path.isdir(sid_path):
+                        continue
+
+                    for file in os.listdir(sid_path):
+                        if not file.startswith('$I'):
+                            continue
+
+                        file_path = os.path.join(sid_path, file)
+                        try:
+                            # Получаем дату удаления из $I файла
+                            file_date = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))
+                            if (datetime.datetime.now() - file_date).days > 14:
+                                continue
+
+                            with open(file_path, 'rb') as f:
+                                data = f.read()
+
+                            if len(data) < 28:
+                                continue
+
+                            original_name = data[28:].decode('utf-16-le', errors='ignore').split('\x00')[0]
+                            original_name_lower = original_name.lower()
+
+                            if len(original_name) > 200 or len(original_name_lower) == 0:
+                                continue
+
+                            if is_safe_mod(original_name_lower):
+                                continue
+
+                            if is_cheat_name(original_name_lower):
+                                results.append({
+                                    'type': 'Deleted Cheat (Recycle Bin)',
+                                    'filename': original_name[:100],
+                                    'date': file_date.strftime('%Y-%m-%d %H:%M'),
+                                    'severity': 'CRITICAL'
+                                })
+                                self.log(f"   [!!!] НАЙДЕН УДАЛЁННЫЙ ЧИТ В КОРЗИНЕ: {original_name[:70]}")
+
+                        except:
+                            continue
+            except:
+                continue
+
+        return results
+
+    # ──────────────────────────────────────────────────────────────
+    # USN Journal (только для админов)
+    # ──────────────────────────────────────────────────────────────
+    def scan_usn_journal(self) -> List[Dict]:
+        results = []
+        if not is_admin():
+            return results
+
+        try:
+            cmd = 'fsutil usn enumdata 1 0 500000 C:\\'
+            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
+            output, _ = process.communicate(timeout=90)
+            lines = output.decode('cp866', errors='ignore').splitlines()
+
+            current_file = None
+            for line in lines:
+                if line.startswith('File Name'):
+                    current_file = line.split(':', 1)[1].strip().lower()
+                elif 'Reason' in line and current_file and ('FILE_DELETE' in line or 'DATA_OVERWRITE' in line):
+                    if is_cheat_name(current_file) and not is_safe_mod(current_file):
+                        results.append({
+                            'type': 'USN Journal Delete',
+                            'filename': current_file[:100],
+                            'severity': 'CRITICAL'
+                        })
+                        self.log(f"   [!!!] USN: удалён чит → {current_file[:70]}")
+                    current_file = None
+
+                if len(results) >= 40:
+                    break
+        except:
+            pass
+
+        return results
+
+    # ──────────────────────────────────────────────────────────────
+    # MFT Scan через PowerShell (самый глубокий уровень)
+    # ──────────────────────────────────────────────────────────────
+    def scan_ntfs_mft(self) -> List[Dict]:
+        results = []
+        if not is_admin():
+            return results
+
+        ps_script = r'''
+        $ErrorActionPreference = 'SilentlyContinue'
+        fsutil usn enumdata 1 0 200000 C: 2>$null | Where-Object {
+            $_ -match '\.(exe|dll|jar|bat|ps1|lnk)$' -and $_ -match 'FILE_DELETE'
+        } | ForEach-Object {
+            if ($_ -match 'File Name\s*:\s*(.+)' -or $_ -match 'Name\s*:\s*(.+)' -or $_ -match 'Full Path') {
+                $name = $matches[1] -replace '.*\\', ''
+                if ($name) { Write-Output "DELETED_MFT:$name" }
+            }
+        }
+        '''
+
+        try:
+            result = subprocess.run(
+                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+                capture_output=True, text=True, timeout=80
+            )
+
+            for line in result.stdout.splitlines():
+                if line.startswith('DELETED_MFT:'):
+                    filename = line[12:].strip().lower()
+                    if len(filename) > 4 and is_cheat_name(filename) and not is_safe_mod(filename):
+                        results.append({
+                            'type': 'MFT Deleted File',
+                            'filename': filename[:100],
+                            'severity': 'CRITICAL'
+                        })
+                        self.log(f"   [!!!] MFT: найден удалённый чит → {filename[:70]}")
+        except:
+            pass
+
+        return results[:25]
+
+    # ──────────────────────────────────────────────────────────────
+    # Основной метод
+    # ──────────────────────────────────────────────────────────────
+    def scan_all(self, minecraft_path: str = None) -> List[Dict]:
+        self.log("\n   [→] Запуск сканирования удалённых файлов и очистки корзины...")
+        all_results = []
+
+        all_results.extend(self.scan_recycle_bin())
+        all_results.extend(self.scan_usn_journal())
+        all_results.extend(self.scan_ntfs_mft())
+
+        total = len(all_results)
+        if total == 0:
+            self.log("   [+] Удалённых читов не обнаружено. Корзина чистая.")
+        else:
+            self.log(f"   [!!!] ВНИМАНИЕ: обнаружено {total} подозрительных удалений!")
+
+        return all_results
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Вспомогательные функции (обязательно оставь их в том же файле)
+# ═══════════════════════════════════════════════════════════════════
+
+def is_admin() -> bool:
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+
+def is_cheat_name(filename: str) -> bool:
+    cheats = [
+        'wurst', 'impact', 'aristois', 'meteor', 'sigma', 'vape', 'flux', 'liquidbounce',
+        'cheat', 'hack', 'ghost', 'reach', 'killaura', 'aimbot', 'triggerbot', 'xray',
+        'autumn', 'rise', 'phobos', 'future', 'salhack', 'inertia', 'nursultan', 'neverlose',
+        'osiris', 'gamesense', 'skeet', 'onyx', 'evrika', 'neverhook', 'funtime', 'cheatbreaker'
+    ]
+    filename = filename.replace(' ', '').replace('_', '').replace('-', '')
+    return any(c in filename for c in cheats)
+
+
+def is_safe_mod(name: str) -> bool:
+    safe = [
+        'optifine', 'sodium', 'iris', 'fabric', 'forge', 'lunarclient', 'badlion',
+        'labymod', 'feather', 'vanilla', 'replaymod', 'worldedit', 'journeymap',
+        'voicechat', 'plasmovoice', 'essential', 'minecraft', 'tlauncher', 'shiginima'
+    ]
+    return any(s in name for s in safe)
+
+
+# Пример использования:
+# detector = DeletedFilesDetector()
+# results = detector.scan_all()
+# for r in results:
+#     print(r)
+# ═══════════════════════════════════════════════════════════════════
+# VM DETECTOR
+# ═══════════════════════════════════════════════════════════════════
+
+class VMDetector:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def run_all_checks(self) -> Tuple[bool, str, List[str]]:
+        detections = []
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'].lower() in [p.lower() for p in VM_PROCESSES]: detections.append(f"Process: {proc.info['name']}")
+            except: pass
+        if WINREG_AVAILABLE:
+            for key_path, vm_type in VM_REGISTRY_KEYS:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path): detections.append(f"Registry: {vm_type}")
+                except: pass
+        try:
+            for iface, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == psutil.AF_LINK:
+                        mac = addr.address.upper().replace("-", ":")
+                        for prefix in VM_MAC_PREFIXES:
+                            if mac.startswith(prefix): detections.append(f"MAC: {mac[:8]}")
+        except: pass
+        if WMI_AVAILABLE:
+            try:
+                c = wmi.WMI()
+                for bios in c.Win32_BIOS():
+                    bios_str = f"{bios.Manufacturer} {bios.SMBIOSBIOSVersion}".lower()
+                    for vm_string in VM_BIOS_STRINGS:
+                        if vm_string in bios_str: detections.append(f"BIOS: {vm_string}")
+            except: pass
+        return (True, "⚠️ VM DETECTED", detections) if detections else (False, "✅ Real PC", [])
+
+# ═══════════════════════════════════════════════════════════════════
+# ADDITIONAL CHECKERS
+# ═══════════════════════════════════════════════════════════════════
+
+class BlockedAccessChecker:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def check_all(self) -> List[Dict]:
+        results = []
+        hosts_path = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), r'System32\drivers\etc\hosts')
+        if os.path.exists(hosts_path):
+            try:
+                with open(hosts_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    for i, line in enumerate(f, 1):
+                        line_stripped = line.strip()
+                        if not line_stripped or line_stripped.startswith('#'): continue
+                        for domain in ANTICHEAT_DOMAINS:
+                            if domain in line_stripped.lower():
+                                results.append({'type': 'Anticheat Block', 'line': i, 'match': domain, 'severity': 'CRITICAL'})
+            except: pass
+        return results
+
+
+class ProcessAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def log(self, msg: str): self.log_callback(msg)
+    
+    def get_loaded_modules(self, pid: int) -> List[Dict]:
+        modules = []
+        try:
+            h_process = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
+            if not h_process: return modules
+            try:
+                h_modules = (ctypes.wintypes.HMODULE * 1024)()
+                cb_needed = ctypes.wintypes.DWORD()
+                if psapi.EnumProcessModulesEx(h_process, ctypes.byref(h_modules), ctypes.sizeof(h_modules), ctypes.byref(cb_needed), 0x03):
+                    num_modules = cb_needed.value // ctypes.sizeof(ctypes.wintypes.HMODULE)
+                    for i in range(min(num_modules, 500)):
+                        try:
+                            module_name = ctypes.create_string_buffer(260)
+                            module_info = MODULEINFO()
+                            if psapi.GetModuleFileNameExA(h_process, h_modules[i], module_name, 260):
+                                name = module_name.value.decode('utf-8', errors='ignore')
+                                size = 0
+                                if psapi.GetModuleInformation(h_process, h_modules[i], ctypes.byref(module_info), ctypes.sizeof(module_info)):
+                                    size = module_info.SizeOfImage
+                                modules.append({'name': os.path.basename(name), 'path': name, 'size': size})
+                        except: continue
+            finally: kernel32.CloseHandle(h_process)
+        except: pass
+        return modules
+    
+    def analyze_javaw(self) -> Dict:
+        results = {'found': False, 'pid': None, 'modules': [], 'suspicious_modules': [], 'banned_dll': []}
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = proc.info['name'].lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                if 'java' in name and ('minecraft' in cmdline or '.minecraft' in cmdline):
+                    results['found'], results['pid'] = True, proc.info['pid']
+                    self.log(f"   [*] Found javaw.exe (PID: {proc.info['pid']})")
+                    modules = self.get_loaded_modules(proc.info['pid'])
+                    results['modules'] = modules
+                    for mod in modules:
+                        mod_name, mod_size, mod_path = mod['name'].lower(), mod.get('size', 0), mod.get('path', '').lower()
+                        if is_safe_dll(mod_name) or is_safe_path(mod_path): continue
+                        banned = is_banned_dll_size(mod_size)
+                        if banned and not any(j in mod_name for j in ['jimage', 'management', 'extnet', 'java', 'jvm', 'awt', 'nio']):
+                            results['banned_dll'].append({'name': mod['name'], 'path': mod['path'], 'size': mod_size, 'reason': banned})
+                            self.log(f"   [!!!] BANNED DLL: {mod['name']}")
+                        if is_cheat_name(mod_name):
+                            results['suspicious_modules'].append({'name': mod['name'], 'path': mod['path'], 'reason': 'Cheat name'})
+                    break
+            except: pass
+        return results
+
+
+class FileSearcher:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def quick_search(self, minecraft_path: str) -> List[Tuple]:
+        results = []
+        def scan(path: str, depth: int):
+            if depth > 6: return
+            try:
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                if entry.name.lower() not in SKIP_FOLDERS: scan(entry.path, depth + 1)
+                            elif entry.is_file(follow_symlinks=False):
+                                filename = entry.name.lower()
+                                if is_safe_mod(filename) or is_safe_path(entry.path): continue
+                                if filename.endswith(('.exe', '.jar', '.dll')) and is_cheat_name(filename):
+                                    results.append((entry.path, f"Cheat: {entry.name}", get_file_size(entry.path), get_file_date(entry.path)))
+                                elif filename.endswith('.dll') and not is_safe_dll(filename):
+                                    banned = is_banned_dll_size(get_file_size(entry.path))
+                                    if banned: results.append((entry.path, f"Banned DLL: {banned}", get_file_size(entry.path), get_file_date(entry.path)))
+                        except: continue
+            except: pass
+        scan(minecraft_path, 0)
+        for folder in ['Downloads', 'Desktop']: scan(os.path.join(os.path.expanduser('~'), folder), 0)
+        return results
+
+
+class PrefetchAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+        self.prefetch_path = os.path.expandvars(r"%SystemRoot%\Prefetch")
+    
+    def check_prefetch(self) -> List[Dict]:
+        results = []
+        if not os.path.exists(self.prefetch_path): return results
+        try:
+            for file in os.listdir(self.prefetch_path):
+                if not file.upper().endswith(".PF"): continue
+                file_path = os.path.join(self.prefetch_path, file)
+                file_date = get_file_date(file_path)
+                if file_date and is_within_7_days(file_date):
+                    exe_name = file.rsplit('-', 1)[0].lower() if '-' in file else file.lower()
+                    if not is_safe_mod(exe_name) and is_cheat_name(exe_name):
+                        for mod in BANNED_MODS:
+                            if mod.replace(' ', '') in exe_name:
+                                results.append({'type': 'Prefetch', 'exe': exe_name, 'date': file_date.strftime('%Y-%m-%d %H:%M'), 'match': mod})
+                                break
+        except: pass
+        return results[:20]
+
+
+class DiscordChecker:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def check_discord(self) -> List[Dict]:
+        results = []
+        appdata = os.environ.get('APPDATA', '')
+        for discord_path in [os.path.join(appdata, 'discord'), os.path.join(appdata, 'discordcanary')]:
+            storage_path = os.path.join(discord_path, 'Local Storage', 'leveldb')
+            if os.path.exists(storage_path):
+                try:
+                    for file in os.listdir(storage_path):
+                        if file.endswith('.log') or file.endswith('.ldb'):
+                            try:
+                                with open(os.path.join(storage_path, file), 'rb') as f:
+                                    content = f.read().decode('utf-8', errors='ignore').lower()
+                                    for site in BANNED_CHEAT_WEBSITES:
+                                        if site in content:
+                                            results.append({'type': 'Discord', 'match': site})
+                                            break
+                            except: continue
+                except: pass
+        return results[:10]
+
+
+class CrashReportAnalyzer:
+    def __init__(self, log_callback=None):
+        self.log_callback = log_callback or print
+    
+    def check_crashes(self, minecraft_path: str) -> List[Dict]:
+        results = []
+        crash_dir = os.path.join(minecraft_path, "crash-reports")
+        if not os.path.exists(crash_dir): return results
+        try:
+            for file in os.listdir(crash_dir):
+                if not file.endswith('.txt'): continue
+                file_path = os.path.join(crash_dir, file)
+                if not is_within_14_days(get_file_date(file_path)): continue
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read().lower()
+                    for mod in BANNED_MODS:
+                        if mod in content:
+                            results.append({'type': 'Crash', 'file': file, 'match': mod})
+                            break
+                except: continue
+        except: pass
+        return results[:10]
+
+# ═══════════════════════════════════════════════════════════════════
+# CHECK RESULT (ПОЛНАЯ ВЕРСИЯ)
+# ═══════════════════════════════════════════════════════════════════
+
+from dataclasses import dataclass, field
+from typing import List, Dict, Set, Tuple
+import datetime
+import platform
+import os
+import re
+
+
+@dataclass
+class CheckResult:
+    bans: List[Dict] = field(default_factory=list)
+    twinks: Set[str] = field(default_factory=set)
+    system_info: Dict = field(default_factory=dict)
+    vm_status: str = "Not checked"
+    vm_detected: bool = False
+    vm_details: List[str] = field(default_factory=list)
+    gpu_info: str = "Unknown"
+    banned_sites: List[Dict] = field(default_factory=list)
+    blocked_access: List[Dict] = field(default_factory=list)
+    found_files: List[Tuple] = field(default_factory=list)
+    process_analysis: Dict = field(default_factory=dict)
+    prefetch_results: List[Dict] = field(default_factory=list)
+    discord_results: List[Dict] = field(default_factory=list)
+    crash_results: List[Dict] = field(default_factory=list)
+    network_bypass: List[Dict] = field(default_factory=list)
+    loaded_modules: Dict = field(default_factory=dict)
+    unloaded_modules: Dict = field(default_factory=dict)
+    modules_no_desc: List[Dict] = field(default_factory=list)
+    dps_results: List[Dict] = field(default_factory=list)
+    memory_strings: List[Dict] = field(default_factory=list)
+    csrss_paths: List[Dict] = field(default_factory=list)
+    usb_activity: List[Dict] = field(default_factory=list)
+    jar_analysis: List[Dict] = field(default_factory=list)
+    jumplist_results: List[Dict] = field(default_factory=list)
+    registry_cleaning: List[Dict] = field(default_factory=list)
+    prefetch_usb: List[Dict] = field(default_factory=list)
+    bam_results: List[Dict] = field(default_factory=list)
+    bam_unsigned: List[Dict] = field(default_factory=list)
+    deleted_files: List[Dict] = field(default_factory=list)
+    cheat_sites: List[Dict] = field(default_factory=list)
+    site_blocking: List[Dict] = field(default_factory=list)
+    last_usb_disconnect: str = "Unknown"
+    last_recycle_clear: str = "Unknown"
+    logs_content: bytes = field(default_factory=bytes)
+    logs_count: int = 0
+    
+    def add_ban(self, category: str, reason: str, details: str = ""):
+        self.bans.append({"category": category, "reason": reason, "details": details})
+    
+    def add_twink(self, nickname: str):
+        if (
+            nickname and
+            3 <= len(nickname) <= 16 and
+            re.match(r'^[a-zA-Z0-9_]+$', nickname)
+        ):
+            self.twinks.add(nickname)
+    
+    def get_total_findings(self) -> int:
+        lm = (
+            len(self.loaded_modules.get('banned_weight', [])) +
+            len(self.loaded_modules.get('suspicious', []))
+        ) if isinstance(self.loaded_modules, dict) else 0
+
+        um = (
+            len(self.unloaded_modules.get('banned_weight', [])) +
+            len(self.unloaded_modules.get('deleted', []))
+        ) if isinstance(self.unloaded_modules, dict) else 0
+
+        return (
+            len(self.bans) +
+            len(self.prefetch_results) +
+            len(self.discord_results) +
+            len(self.crash_results) +
+            len(self.network_bypass) +
+            lm +
+            um +
+            len(self.dps_results) +
+            len(self.memory_strings) +
+            len(self.csrss_paths) +
+            len(self.jar_analysis) +
+            len(self.jumplist_results) +
+            len(self.registry_cleaning) +
+            len(self.prefetch_usb) +
+            len(self.bam_unsigned) +
+            len(self.deleted_files) +
+            len(self.cheat_sites) +
+            len(self.site_blocking)
+        )
+    
+    def should_ban(self) -> bool:
+        return self.get_total_findings() > 0
+    
+    def generate_report(self) -> str:
+        r = [
+            "=" * 70,
+            "HOLYWORLD AUTO CHECKER v7.8 - FULL REPORT",
+            f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"PC: {platform.node()}",
+            f"User: {os.environ.get('USERNAME', 'Unknown')}",
+            f"GPU: {self.gpu_info}",
+            "=" * 70
+        ]
+
+        # SYSTEM INFO
+        if self.system_info:
+            r.append("\n📊 SYSTEM INFO:")
+            for key, value in self.system_info.items():
+                if key not in ['services', 'event104']:
+                    r.append(f"   {key}: {value}")
+
+        # USB / RECYCLE
+        r.extend([
+            f"\n💾 USB/Recycle Info:",
+            f"   Last USB Disconnect: {self.last_usb_disconnect}",
+            f"   Last Recycle Bin Activity: {self.last_recycle_clear}"
+        ])
+
+        # SUMMARY
+        total = self.get_total_findings()
+        r.append(
+            f"\n{'🚫' if total > 0 else '✅'} "
+            f"{'FOUND: ' + str(total) + ' VIOLATIONS' if total > 0 else 'CLEAN'}"
+        )
+
+        # CRITICAL BANS
+        if self.bans:
+            r.append(f"\n📛 CRITICAL BANS ({len(self.bans)}):")
+            for b in self.bans:
+                r.append(f"   🔴 [{b['category']}] {b['reason']}")
+                if b['details']:
+                    r.append(f"       └─ {b['details'][:80]}")
+
+        # 🧠 MEMORY STRINGS: выводим PATTERN и RESULT (как в Cheat Engine)
+        if self.memory_strings:
+            r.append("\n" + "=" * 70)
+            r.append(f"🧠 MEMORY STRINGS DETECTED ({len(self.memory_strings)}):")
+            r.append("=" * 70)
+            for i, item in enumerate(self.memory_strings, 1):
+                pid = item.get('pid', 'N/A')
+                typ = item.get('type', 'Memory')
+                sev = item.get('severity', '')
+                pattern = item.get('pattern') or ''
+                result_str = (
+                    item.get('result') or
+                    item.get('match') or
+                    pattern or
+                    'Unknown'
+                )
+                result_str = result_str.replace("\n", " ")[:200]
+
+                if pattern:
+                    r.append(f"   {i}. [{typ} {sev}] PID: {pid} | Pattern: {pattern}")
+                else:
+                    r.append(f"   {i}. [{typ} {sev}] PID: {pid}")
+                r.append(f"      Result: {result_str}")
+
+        # CHEAT SITES
+        if self.cheat_sites:
+            r.append(f"\n🌐 CHEAT SITES ({len(self.cheat_sites)}):")
+            for s in self.cheat_sites:
+                r.append(f"   [{s['type']}] {s['site']}")
+
+        # SITE BLOCKING
+        if self.site_blocking:
+            r.append(f"\n🚫 SITE BLOCKING ({len(self.site_blocking)}):")
+            for s in self.site_blocking:
+                r.append(f"   {s['site']} -> {s['methods']}")
+
+        # NETWORK BYPASS
+        if self.network_bypass:
+            r.append(f"\n🌐 NETWORK BYPASS ({len(self.network_bypass)}):")
+            for i in self.network_bypass:
+                r.append(f"   🔴 {i.get('remote_ip')}:{i.get('remote_port')}")
+
+        # DPS
+        if self.dps_results:
+            r.append(f"\n📋 DPS DETECTS ({len(self.dps_results)}):")
+            for i in self.dps_results:
+                if i.get('type') == 'DPS Timestamp':
+                    r.append(f"   {i.get('type')}: {i.get('value', '')}")
+                else:
+                    r.append(f"   {i.get('type')}: {i.get('path', 'Unknown')}")
+
+        # JAR MODS
+        if self.jar_analysis:
+            r.append(f"\n📦 SUSPICIOUS MODS ({len(self.jar_analysis)}):")
+            for i in self.jar_analysis:
+                r.append(f"   • {i.get('name')} [{i.get('severity')}]")
+
+        # REGISTRY CLEANING
+        if self.registry_cleaning:
+            r.append(f"\n🧹 REGISTRY CLEANING ({len(self.registry_cleaning)}):")
+            for i in self.registry_cleaning:
+                r.append(f"   • {i.get('key', '')}")
+
+        # DELETED FILES
+        if self.deleted_files:
+            r.append(f"\n🗑️ DELETED FILES ({len(self.deleted_files)}):")
+            for i in self.deleted_files:
+                r.append(f"   • {i.get('filename', '')[:60]}")
+
+        # FINAL INFO
+        r.extend([
+            f"\n🖥️ VM: {self.vm_status}",
+            f"🎮 GPU: {self.gpu_info}"
+        ])
+
+        # TWINKS
+        if self.twinks:
+            r.append(f"\n👤 Twinks ({len(self.twinks)}): {' '.join(sorted(self.twinks))}")
+
+        # SERVICES
+        if self.system_info.get('services'):
+            r.append("\n⚙️ SERVICES:")
+            for svc in self.system_info['services']:
+                r.append(f"   • {svc}")
+
+        # EVENT 104
+        if self.system_info.get('event104'):
+            r.append("\n⚠️ LOG CLEARING EVENTS:")
+            for evt in self.system_info['event104']:
+                r.append(f"   • {evt}")
+
+        r.append("\n" + "=" * 70)
+        return "\n".join(r)
+# ═══════════════════════════════════════════════════════════════════
+# LOG ARCHIVER
+# ═══════════════════════════════════════════════════════════════════
+
+class LogArchiver:
+    def __init__(self, minecraft_path: str, log_callback=None):
+        self.minecraft_path, self.logs_path = minecraft_path, os.path.join(minecraft_path, "logs")
+        self.log_callback = log_callback or print
+    
+    def process_logs_to_memory(self) -> Tuple[bytes, int]:
+        if not os.path.exists(self.logs_path): return b'', 0
+        recent_logs = []
+        try:
+            for file in os.listdir(self.logs_path):
+                file_path = os.path.join(self.logs_path, file)
+                if os.path.isfile(file_path) and (file.endswith('.log') or file.endswith('.log.gz')) and is_within_14_days(get_file_date(file_path)):
+                    recent_logs.append((file, file_path))
+            if not recent_logs: return b'', 0
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for file_name, file_path in recent_logs: zipf.write(file_path, file_name)
+            return zip_buffer.getvalue(), len(recent_logs)
+        except: return b'', 0
+
+# ═══════════════════════════════════════════════════════════════════
+# TELEGRAM (ПОЛНАЯ ВЕРСИЯ с check.txt)
+# ═══════════════════════════════════════════════════════════════════
+
+class TelegramDirect:
+    def __init__(self):
+        self.api_url = f"https://api.telegram.org/bot{BOT_TOKEN}"
+        self.moderator_id = None
+    
+    def verify_code(self, code: str) -> Tuple[bool, str]:
+        success, user_id, message = decode_moderator_id(code)
+        if success: self.moderator_id = user_id
+        return (True, message) if success else (False, message)
+    
+    def send_message(self, chat_id: int, text: str) -> bool:
+        try: return requests.post(f"{self.api_url}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=30).status_code == 200
+        except: return False
+    
+    def send_document(self, chat_id: int, content: bytes, filename: str, caption: str = "") -> bool:
+        try: return requests.post(f"{self.api_url}/sendDocument", data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}, files={'document': (filename, content)}, timeout=120).status_code == 200
+        except: return False
+    
+    def generate_check_file(self, result) -> str:
+        """Генерирует детальный файл check.txt со всеми находками"""
+        lines = []
+        lines.append("=" * 70)
+        lines.append("HOLYWORLD CHECKER v7.8 - DETAILED CHECK RESULTS")
+        lines.append(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"PC: {platform.node()}")
+        lines.append("=" * 70)
+        
+        # Memory Strings - ПОЛНЫЙ СПИСОК
+        if result.memory_strings:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🧠 MEMORY STRINGS DETECTED ({len(result.memory_strings)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.memory_strings, 1):
+                pattern = item.get('pattern') or item.get('match') or 'Unknown'
+                pid = item.get('pid', 'N/A')
+                address = item.get('address', 'N/A')
+                lines.append(f"{i}. Pattern: {pattern}")
+                lines.append(f"   PID: {pid} | Address: {address}")
+                lines.append(f"   Severity: {item.get('severity', 'CRITICAL')}")
+                lines.append("")
+        
+        # DPS Results
+        if result.dps_results:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"📋 DPS SERVICE DETECTS ({len(result.dps_results)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.dps_results, 1):
+                if item.get('type') == 'DPS Timestamp':
+                    lines.append(f"{i}. Timestamp: {item.get('value', 'Unknown')}")
+                else:
+                    lines.append(f"{i}. Path: {item.get('path', 'Unknown')}")
+                    lines.append(f"   Exists: {item.get('exists', 'Unknown')}")
+                lines.append(f"   Severity: {item.get('severity', 'HIGH')}")
+                lines.append("")
+        
+        # Loaded Modules
+        if isinstance(result.loaded_modules, dict):
+            banned = result.loaded_modules.get('banned_weight', [])
+            suspicious = result.loaded_modules.get('suspicious', [])
+            no_desc = result.loaded_modules.get('no_description', [])
+            
+            if banned or suspicious or no_desc:
+                lines.append(f"\n{'='*70}")
+                lines.append(f"📦 LOADED MODULES ISSUES")
+                lines.append("=" * 70)
+                
+                if banned:
+                    lines.append(f"\n--- BANNED WEIGHT ({len(banned)}) ---")
+                    for i, item in enumerate(banned, 1):
+                        lines.append(f"{i}. {item.get('name', 'Unknown')}")
+                        lines.append(f"   Path: {item.get('path', 'N/A')}")
+                        lines.append(f"   Size: {item.get('size_mb', 'N/A')} MB")
+                        lines.append(f"   Reason: {item.get('reason', 'N/A')}")
+                        lines.append("")
+                
+                if suspicious:
+                    lines.append(f"\n--- SUSPICIOUS ({len(suspicious)}) ---")
+                    for i, item in enumerate(suspicious, 1):
+                        lines.append(f"{i}. {item.get('name', 'Unknown')}")
+                        lines.append(f"   Path: {item.get('path', 'N/A')}")
+                        lines.append(f"   Reason: {item.get('reason', 'N/A')}")
+                        lines.append("")
+        
+        # Unloaded Modules
+        if isinstance(result.unloaded_modules, dict):
+            banned = result.unloaded_modules.get('banned_weight', [])
+            deleted = result.unloaded_modules.get('deleted', [])
+            
+            if banned or deleted:
+                lines.append(f"\n{'='*70}")
+                lines.append(f"🔓 UNLOADED MODULES")
+                lines.append("=" * 70)
+                
+                if banned:
+                    lines.append(f"\n--- BANNED WEIGHT ({len(banned)}) ---")
+                    for i, item in enumerate(banned, 1):
+                        lines.append(f"{i}. {item.get('name', 'Unknown')}")
+                        lines.append(f"   Size: {item.get('size_mb', 'N/A')} MB")
+                        lines.append(f"   Reason: {item.get('reason', 'N/A')}")
+                        lines.append("")
+                
+                if deleted:
+                    lines.append(f"\n--- DELETED ({len(deleted)}) ---")
+                    for i, item in enumerate(deleted, 1):
+                        lines.append(f"{i}. {item.get('name', 'Unknown')}")
+                        lines.append(f"   Path: {item.get('path', 'N/A')}")
+                        lines.append("")
+        
+        # Cheat Sites
+        if result.cheat_sites:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🌐 CHEAT SITES VISITED ({len(result.cheat_sites)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.cheat_sites, 1):
+                lines.append(f"{i}. Site: {item.get('site', 'Unknown')}")
+                lines.append(f"   Source: {item.get('type', 'Unknown')}")
+                if item.get('url'):
+                    lines.append(f"   URL: {item.get('url', '')[:100]}")
+                lines.append("")
+        
+        # Site Blocking
+        if result.site_blocking:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🚫 SITE BLOCKING DETECTED ({len(result.site_blocking)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.site_blocking, 1):
+                lines.append(f"{i}. Site: {item.get('site', 'Unknown')}")
+                lines.append(f"   Methods: {item.get('methods', 'Unknown')}")
+                lines.append("")
+        
+        # Deleted Files
+        if result.deleted_files:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🗑️ DELETED FILES ({len(result.deleted_files)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.deleted_files, 1):
+                lines.append(f"{i}. {item.get('filename', 'Unknown')}")
+                lines.append(f"   Type: {item.get('type', 'Unknown')}")
+                lines.append(f"   Date: {item.get('date', 'Unknown')}")
+                lines.append("")
+        
+        # JAR Analysis
+        if result.jar_analysis:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"📦 SUSPICIOUS MODS ({len(result.jar_analysis)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.jar_analysis, 1):
+                lines.append(f"{i}. {item.get('name', 'Unknown')}")
+                lines.append(f"   Severity: {item.get('severity', 'Unknown')}")
+                if item.get('cheat_classes'):
+                    lines.append(f"   Cheat Classes: {', '.join(item.get('cheat_classes', []))}")
+                if item.get('suspicious_methods'):
+                    lines.append(f"   Suspicious Methods: {', '.join(item.get('suspicious_methods', [])[:5])}")
+                if item.get('jvm_injection'):
+                    lines.append(f"   ⚠️ JVM INJECTION DETECTED!")
+                lines.append("")
+        
+        # Registry Cleaning
+        if result.registry_cleaning:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🧹 REGISTRY CLEANING ({len(result.registry_cleaning)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.registry_cleaning, 1):
+                lines.append(f"{i}. Type: {item.get('type', 'Unknown')}")
+                lines.append(f"   Key: {item.get('key', 'Unknown')}")
+                lines.append("")
+        
+        # Network Bypass
+        if result.network_bypass:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🌐 NETWORK BYPASS ({len(result.network_bypass)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.network_bypass, 1):
+                lines.append(f"{i}. IP: {item.get('remote_ip', 'Unknown')}:{item.get('remote_port', 'N/A')}")
+                lines.append(f"   PID: {item.get('pid', 'N/A')}")
+                lines.append(f"   Status: {item.get('status', 'Unknown')}")
+                lines.append("")
+        
+        # CSRSS Paths
+        if result.csrss_paths:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"🔍 CSRSS PATHS ({len(result.csrss_paths)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.csrss_paths, 1):
+                lines.append(f"{i}. {item.get('name', 'Unknown')}")
+                lines.append(f"   Path: {item.get('path', 'N/A')}")
+                if item.get('banned_size'):
+                    lines.append(f"   Banned: {item.get('banned_size')}")
+                lines.append("")
+        
+        # JumpList
+        if result.jumplist_results:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"📑 JUMPLIST ({len(result.jumplist_results)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.jumplist_results, 1):
+                lines.append(f"{i}. {item.get('filename', 'Unknown')}")
+                lines.append(f"   Exists: {item.get('exists', 'Unknown')}")
+                lines.append("")
+        
+        # BAM
+        if result.bam_results or result.bam_unsigned:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"📝 BAM RESULTS")
+            lines.append("=" * 70)
+            for item in result.bam_results:
+                lines.append(f"   • {item.get('path', 'Unknown')}")
+            for item in result.bam_unsigned:
+                lines.append(f"   • [{'DELETED' if not item.get('exists') else item.get('status')}] {item.get('filename', 'Unknown')}")
+        
+        # Prefetch USB
+        if result.prefetch_usb:
+            lines.append(f"\n{'='*70}")
+            lines.append(f"💾 PREFETCH USB LAUNCHES ({len(result.prefetch_usb)})")
+            lines.append("=" * 70)
+            for i, item in enumerate(result.prefetch_usb, 1):
+                lines.append(f"{i}. {item.get('exe_name', 'Unknown')}")
+                lines.append(f"   Date: {item.get('date', 'Unknown')}")
+                lines.append(f"   Severity: {item.get('severity', 'MEDIUM')}")
+                lines.append("")
+        
+        lines.append("\n" + "=" * 70)
+        lines.append("END OF CHECK RESULTS")
+        lines.append("=" * 70)
+        
+        return "\n".join(lines) if len(lines) > 10 else ""
+    
+    def submit_result(self, result) -> Tuple[bool, str]:
+        if not self.moderator_id: return False, "No moderator ID"
+        try:
+            pc_name = platform.node()
+            total = result.get_total_findings()
+            status = f"🚫 <b>FOUND: {total}</b>" if result.should_ban() else "✅ <b>CLEAN</b>"
+            
+            text = f"🛡 <b>HolyWorld Checker v7.8</b>\n{status}\n\n"
+            text += f"💻 PC: <code>{pc_name}</code>\n"
+            text += f"🎮 GPU: <code>{result.gpu_info}</code>\n"
+            text += f"🖥️ VM: {result.vm_status}\n"
+            text += f"💾 USB: {result.last_usb_disconnect}\n"
+            text += f"🗑️ Recycle: {result.last_recycle_clear}\n"
+            
+            if result.should_ban():
+                text += f"\n<b>📊 Details:</b>\n"
+                if result.memory_strings: text += f"• Memory Strings: {len(result.memory_strings)}\n"
+                if result.cheat_sites: text += f"• Cheat Sites: {len(result.cheat_sites)}\n"
+                if result.site_blocking: text += f"• Site Blocking: {len(result.site_blocking)}\n"
+                if result.network_bypass: text += f"• Network Bypass: {len(result.network_bypass)}\n"
+                if isinstance(result.loaded_modules, dict):
+                    bw = len(result.loaded_modules.get('banned_weight', []))
+                    if bw > 0: text += f"• Banned DLL (Loaded): {bw}\n"
+                if isinstance(result.unloaded_modules, dict):
+                    bw = len(result.unloaded_modules.get('banned_weight', []))
+                    dl = len(result.unloaded_modules.get('deleted', []))
+                    if bw > 0: text += f"• Banned DLL (Unloaded): {bw}\n"
+                    if dl > 0: text += f"• Deleted DLL: {dl}\n"
+                if result.jar_analysis: text += f"• Suspicious Mods: {len(result.jar_analysis)}\n"
+                if result.registry_cleaning: text += f"• Registry Cleaning: {len(result.registry_cleaning)}\n"
+                if result.deleted_files: text += f"• Deleted Files: {len(result.deleted_files)}\n"
+            
+            if result.twinks: text += f"\n👤 <b>Twinks ({len(result.twinks)})</b>"
+            
+            # Отправляем сообщение
+            self.send_message(self.moderator_id, text)
+            
+            # Отправляем Report
+            report_bytes = result.generate_report().encode('utf-8')
+            self.send_document(self.moderator_id, report_bytes, f"Report_{pc_name}_{int(time.time())}.txt", "📄 Report")
+            
+            # Отправляем check.txt с детальными результатами
+            check_content = self.generate_check_file(result)
+            if check_content:
+                self.send_document(self.moderator_id, check_content.encode('utf-8'), "check.txt", "🔍 Detailed Check")
+            
+            # Отправляем логи
+            if result.logs_content:
+                self.send_document(self.moderator_id, result.logs_content, "logs.zip", "📦 Logs")
+            
+            # Отправляем твинки
+            if result.twinks:
+                twinks_content = " ".join(sorted(result.twinks)).encode('utf-8')
+                self.send_document(self.moderator_id, twinks_content, "checktwinks.txt", "👤 Twinks")
+            
+            return True, "OK"
+        except Exception as e: return False, str(e)
+
+# ═══════════════════════════════════════════════════════════════════
+# MAIN CHECKER
+# ═══════════════════════════════════════════════════════════════════
+
+class HolyChecker:
+    def __init__(self, minecraft_path: str, log_callback=None):
+        self.minecraft_path, self.result, self.log_callback = minecraft_path, CheckResult(), log_callback or print
+
+    def log(self, msg: str):
+        self.log_callback(msg)
+
+    def run_all_checks(self):
+        """
+        Запускает ВСЕ проверки параллельно в потоках.
+        Каждая проверка — отдельная задача, по завершении которой
+        увеличивается счётчик и пишется строка вида [x/total] ...,
+        которую GUI использует для прогресса.
+        """
+        self.log("🔧 Инициализация сканирования...")
+
+        tasks = []
+
+        # ───────── ЗАДАЧИ (каждая будет выполнена в отдельном потоке) ─────────
+
+        def t_gpu_info():
+            self.result.gpu_info = get_gpu_info()
+
+        tasks.append(("🎮 GPU Info", t_gpu_info))
+
+        def t_vm_detection():
+            vm_detected, vm_status, vm_details = VMDetector(self.log).run_all_checks()
+            self.result.vm_detected = vm_detected
+            self.result.vm_status = vm_status
+            self.result.vm_details = vm_details
+            if vm_detected:
+                self.result.add_ban("VM", "Virtual Machine", "; ".join(vm_details[:3]))
+
+        tasks.append(("🖥️ VM Detection", t_vm_detection))
+
+        def t_services():
+            ServicesManager(self.log).check_and_start_services()
+
+        tasks.append(("⚙️ Services", t_services))
+
+        def t_site_blocking():
+            self.result.site_blocking = SiteBlockingChecker(self.log).check_sites()
+            for s in self.result.site_blocking:
+                self.result.add_ban("Site Block", s['site'], s['methods'])
+
+        tasks.append(("🚫 Site Blocking", t_site_blocking))
+
+        def t_cheat_sites():
+            self.result.cheat_sites = CheatSitesChecker(self.log).check_all()
+            for s in self.result.cheat_sites:
+                self.result.add_ban("Cheat Site", s['site'], s['type'])
+
+        tasks.append(("🌐 Cheat Sites Check", t_cheat_sites))
+
+        def t_network_bypass():
+            self.result.network_bypass = NetworkBypassDetector(self.log).check_javaw_connections()
+            for n in self.result.network_bypass:
+                self.result.add_ban("Network", f"Bypass: {n['remote_ip']}", "192.168.x.x connection")
+
+        tasks.append(("🌐 Network Bypass", t_network_bypass))
+
+        def t_process_analysis():
+            analysis = ProcessAnalyzer(self.log).analyze_javaw()
+            self.result.process_analysis = analysis
+            if analysis.get('banned_dll'):
+                for mod in analysis['banned_dll']:
+                    self.result.add_ban("DLL", mod['reason'], mod['path'][:60])
+
+        tasks.append(("🔬 Process Analysis", t_process_analysis))
+
+        def t_unloaded_modules():
+            self.result.unloaded_modules = UnloadedModulesScanner(self.log).scan_javaw_modules()
+            for item in self.result.unloaded_modules:
+                self.result.add_ban("DLL Size", item.get('reason', 'Banned'), item.get('name', ''))
+
+        tasks.append(("💉 Unloaded Modules Scan", t_unloaded_modules))
+
+        def t_memory_strings():
+            self.result.memory_strings = MemoryStringsScanner(self.log).scan_all_javaw()
+            for item in self.result.memory_strings:
+                self.result.add_ban("Memory", f"Detect: {item['match'][:30]}", "")
+
+        tasks.append(("🧠 Memory Strings Scan", t_memory_strings))
+
+        def t_dps():
+            self.result.dps_results = DPSServiceScanner(self.log).scan_dps_memory()
+
+        tasks.append(("📋 DPS Service Scan", t_dps))
+
+        def t_csrss():
+            self.result.csrss_paths = CsrssPathsParser(self.log).analyze_paths()
+            for item in self.result.csrss_paths:
+                if item.get('banned_size'):
+                    self.result.add_ban("CSRSS", item['banned_size'], item['path'][:50])
+
+        tasks.append(("🔍 CSRSS Paths Parse", t_csrss))
+
+        def t_jar_mods():
+            self.result.jar_analysis = JarModAnalyzer(self.log).scan_mods_folder(self.minecraft_path)
+            for item in self.result.jar_analysis:
+                if item.get('severity') in ['CRITICAL', 'HIGH']:
+                    self.result.add_ban(
+                        "Mod",
+                        f"Suspicious: {item.get('name', '')}",
+                        ', '.join(item.get('cheat_classes', [])[:3])
+                    )
+
+        tasks.append(("📦 JAR Mod Analysis", t_jar_mods))
+
+        def t_jumplists():
+            self.result.jumplist_results = JumpListAnalyzer(self.log).analyze_jumplists()
+            for item in self.result.jumplist_results:
+                if item['severity'] == 'CRITICAL':
+                    self.result.add_ban(
+                        "JumpList",
+                        item['filename'],
+                        'DELETED' if not item.get('exists') else 'EXISTS'
+                    )
+
+        tasks.append(("📑 JumpList Analysis", t_jumplists))
+
+        def t_registry_cleaning():
+            self.result.registry_cleaning = RegistryCleaningDetector(self.log).check_all()
+            for item in self.result.registry_cleaning:
+                if item['severity'] == 'CRITICAL':
+                    self.result.add_ban(
+                        "Registry",
+                        f"Cleaning: {item['key']}",
+                        item['type']
+                    )
+
+        tasks.append(("🧹 Registry Cleaning Check", t_registry_cleaning))
+
+        def t_prefetch_usb():
+            self.result.prefetch_usb = PrefetchUSBAnalyzer(self.log).check_usb_launches()
+            for item in self.result.prefetch_usb:
+                if item['severity'] == 'CRITICAL':
+                    self.result.add_ban("USB", f"Launch: {item['exe_name']}", item['path'][:50])
+
+        tasks.append(("💾 Prefetch USB Check", t_prefetch_usb))
+
+        def t_bam():
+            bam_analyzer = BAMAnalyzer(self.log)
+            self.result.bam_results = bam_analyzer.check_bam()
+            self.result.bam_unsigned = bam_analyzer.check_bam_unsigned()
+            for item in self.result.bam_unsigned:
+                if item['severity'] == 'CRITICAL':
+                    self.result.add_ban("BAM", f"Deleted: {item['filename']}", item['path'][:50])
+
+        tasks.append(("📝 BAM Check", t_bam))
+
+        def t_deleted():
+            self.result.deleted_files = DeletedFilesDetector(self.log).scan_all(self.minecraft_path)
+            for item in self.result.deleted_files:
+                self.result.add_ban("Deleted", item['filename'][:40], item.get('type', ''))
+
+        tasks.append(("🗑️ Deleted Files Detection", t_deleted))
+
+        def t_usb_activity():
+            self.result.usb_activity = USBFlashDetector(self.log).check_flash_drive_usage()
+
+        tasks.append(("💿 USB Activity Check", t_usb_activity))
+
+        def t_file_search():
+            self.result.found_files = FileSearcher(self.log).quick_search(self.minecraft_path)
+            for fp, reason, _, _ in self.result.found_files:
+                self.result.add_ban("File", reason, os.path.basename(fp))
+
+        tasks.append(("📁 File Search", t_file_search))
+
+        def t_blocked_access():
+            self.result.blocked_access = BlockedAccessChecker(self.log).check_all()
+            for item in self.result.blocked_access:
+                self.result.add_ban("Block", f"Blocked: {item.get('match')}", "")
+
+        tasks.append(("🚫 Blocked Access Check", t_blocked_access))
+
+        def t_prefetch():
+            self.result.prefetch_results = PrefetchAnalyzer(self.log).check_prefetch()
+
+        tasks.append(("⭐ Prefetch Check", t_prefetch))
+
+        def t_discord():
+            self.result.discord_results = DiscordChecker(self.log).check_discord()
+
+        tasks.append(("💬 Discord Check", t_discord))
+
+        def t_crash():
+            self.result.crash_results = CrashReportAnalyzer(self.log).check_crashes(self.minecraft_path)
+
+        tasks.append(("💥 Crash Reports Check", t_crash))
+
+        def t_twinks():
+            twinks, sys_info = TwinksCollector(self.log).collect_twinks(self.minecraft_path)
+            for t in twinks:
+                self.result.add_twink(t)
+            self.result.system_info = sys_info
+
+        tasks.append(("👤 Twinks Collection", t_twinks))
+
+        def t_logs():
+            self.result.logs_content, self.result.logs_count = LogArchiver(
+                self.minecraft_path, self.log
+            ).process_logs_to_memory()
+
+        tasks.append(("📜 Logs Archive", t_logs))
+
+        # ───────── Запуск всех задач параллельно ─────────
+
+        total_tasks = len(tasks)
+        completed = 0
+        lock = threading.Lock()
+        threads = []
+
+        def worker(name: str, func):
+            nonlocal completed
+            try:
+                self.log(f"[*] {name}...")
+                func()
+            except Exception as e:
+                self.log(f"[!] {name} error: {str(e)[:80]}")
+            finally:
+                with lock:
+                    completed += 1
+                    # эта строка даёт формат [x/total], который понимает GUI для прогресса
+                    self.log(f"[{completed}/{total_tasks}] {name}")
+
+        for name, func in tasks:
+            t = threading.Thread(target=worker, args=(name, func), daemon=True)
+            threads.append(t)
+            t.start()
+
+        # Ждём завершения всех потоков
+        for t in threads:
+            t.join()
+
+        self.log(f"✅ Complete! Found: {self.result.get_total_findings()} violations")
+        return self.result
+# ═══════════════════════════════════════════════════════════════════
+# GUI (Neon / Glass style)
+# ═══════════════════════════════════════════════════════════════════
+
+class HolyCheckerApp:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("HolyWorld Checker v7.8")
+
+        # Адаптированный размер под карточный дизайн
+        win_w, win_h = 640, 420
+        try:
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            pos_x = (screen_w // 2) - (win_w // 2)
+            pos_y = (screen_h // 2) - (win_h // 2)
+            self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        except:
+            self.root.geometry(f"{win_w}x{win_h}")
+
+        self.root.minsize(win_w, win_h)
+        self.root.resizable(False, False)
+
+        # Цветовая палитра под неон‑/glass‑дизайн
+        self.bg = "#030712"                # общий фон окна
+        self.card_bg = "#020617"           # фон карточки (стекло)
+        self.card_inner = "#0B1220"        # внутренний слой карточки
+        self.border_color = "#111827"
+        self.accent_primary = "#EC4899"    # розовый неон
+        self.accent_secondary = "#8B5CF6"  # фиолетовый неон
+        self.text_primary = "#E5E7EB"
+        self.text_muted = "#6B7280"
+
+        self.root.configure(bg=self.bg)
+
+        self.minecraft_path = None
+        self.scanning = False
+
+        self.setup_styles()
+        self.create_widgets()
+        self.find_minecraft()
+
+    # ──────────────────────────────────────────────────────────────
+    # Стили ttk (прогресс‑бар)
+    # ──────────────────────────────────────────────────────────────
+    def setup_styles(self):
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except:
+            pass
+
+        style.configure(
+            "Neon.Horizontal.TProgressbar",
+            troughcolor="#020617",
+            background=self.accent_primary,
+            lightcolor=self.accent_secondary,
+            darkcolor=self.accent_secondary,
+            bordercolor="#020617",
+            relief="flat"
+        )
+        style.layout(
+            "Neon.Horizontal.TProgressbar",
+            [
+                ("Horizontal.Progressbar.trough", {
+                    "children": [
+                        ("Horizontal.Progressbar.pbar", {
+                            "side": "left",
+                            "sticky": "ns"
+                        })
+                    ],
+                    "sticky": "nsew"
+                })
+            ]
+        )
+
+    # ──────────────────────────────────────────────────────────────
+    # Разметка
+    # ──────────────────────────────────────────────────────────────
+    def create_widgets(self):
+        main = tk.Frame(self.root, bg=self.bg)
+        main.pack(fill="both", expand=True)
+
+        # Внешняя "стеклянная" карточка
+        outer_card = tk.Frame(
+            main,
+            bg=self.card_bg,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.border_color
+        )
+        outer_card.pack(fill="both", expand=True, padx=28, pady=28)
+
+        # Внутренний слой
+        card = tk.Frame(outer_card, bg=self.card_inner, bd=0)
+        card.pack(fill="both", expand=True, padx=1, pady=1)
+
+        # ── Верх карточки: индикатор + заголовок ──
+        header = tk.Frame(card, bg=self.card_inner)
+        header.pack(fill="x", padx=24, pady=(16, 6))
+
+        indicator = tk.Canvas(
+            header,
+            width=26,
+            height=26,
+            bg=self.card_inner,
+            highlightthickness=0,
+            bd=0
+        )
+        indicator.pack(side="left", padx=(0, 10))
+        indicator.create_oval(
+            4, 4, 22, 22,
+            fill=self.accent_secondary,
+            outline=self.accent_primary,
+            width=2
+        )
+
+        title_block = tk.Frame(header, bg=self.card_inner)
+        title_block.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            title_block,
+            text="HolyWorld Checker",
+            font=("Segoe UI", 17, "bold"),
+            fg=self.text_primary,
+            bg=self.card_inner
+        ).pack(anchor="w")
+
+        tk.Label(
+            title_block,
+            text="Memory • DLL • Registry • USB • Cheat Sites",
+            font=("Segoe UI", 9),
+            fg=self.text_muted,
+            bg=self.card_inner
+        ).pack(anchor="w", pady=(2, 0))
+
+        accent_bar = tk.Frame(card, bg=self.accent_primary, height=2)
+        accent_bar.pack(fill="x", padx=24, pady=(4, 16))
+
+        # ── Центр: код + кнопка ──
+        center = tk.Frame(card, bg=self.card_inner)
+        center.pack(fill="x", padx=24)
+
+        tk.Label(
+            center,
+            text="Код модератора",
+            font=("Segoe UI", 11, "bold"),
+            fg=self.text_primary,
+            bg=self.card_inner
+        ).pack(anchor="w", pady=(0, 6))
+
+        self.code_entry = tk.Entry(
+            center,
+            font=("Consolas", 20),
+            width=18,
+            justify="center",
+            bg="#020617",
+            fg="white",
+            insertbackground="white",
+            relief="flat"
+        )
+        self.code_entry.pack(pady=(0, 12), ipady=8, fill="x")
+
+        # --- ВСТАВКА И КЛАВИШИ ДЛЯ ПОЛЯ КОДА ---
+
+        def paste_from_clipboard(event=None):
+            """Вставка из буфера обмена в поле кода, независимо от раскладки."""
+            try:
+                text = self.root.clipboard_get()
+            except tk.TclError:
+                return "break"
+            if text:
+                self.code_entry.insert(tk.INSERT, text)
+            return "break"
+
+        def on_ctrl_key(event):
+            """
+            Обработчик любых Ctrl+клавиш.
+            Физическая клавиша V на Windows обычно имеет keycode 86,
+            её ловим — это работает на любой раскладке.
+            """
+            if event.keycode == 86:  # физический код клавиши V
+                return paste_from_clipboard(event)
+            return
+
+        # Ловим все Ctrl+клавиши и руками обрабатываем только физическую V
+        self.code_entry.bind("<Control-Key>", on_ctrl_key)
+
+        # Дополнительно: Shift+Insert (стандартная вставка Windows)
+        self.code_entry.bind("<Shift-Insert>", paste_from_clipboard)
+
+        # Биндинг на Enter для запуска сканирования
+        self.code_entry.bind("<Return>", lambda e: self.start_scan())
+
+        # Кнопка в неон‑стиле
+        self.scan_btn = tk.Button(
+            center,
+            text="НАЧАТЬ ПРОВЕРКУ",
+            font=("Segoe UI", 12, "bold"),
+            bg=self.accent_primary,
+            fg="white",
+            activebackground=self.accent_secondary,
+            activeforeground="white",
+            relief="flat",
+            cursor="hand2",
+            padx=10,
+            pady=8,
+            command=self.start_scan
+        )
+        self.scan_btn.pack(pady=(0, 8), fill="x")
+
+        # ── Низ: статус + путь + прогресс ──
+        bottom = tk.Frame(card, bg=self.card_inner)
+        bottom.pack(fill="both", expand=True, padx=24, pady=(6, 14))
+
+        self.status = tk.Label(
+            bottom,
+            text="Ожидание...",
+            font=("Segoe UI", 10),
+            fg=self.text_muted,
+            bg=self.card_inner,
+            anchor="w"
+        )
+        self.status.pack(fill="x")
+
+        self.path_label = tk.Label(
+            bottom,
+            text="",
+            font=("Segoe UI", 9),
+            fg="#4B5563",
+            bg=self.card_inner,
+            anchor="w"
+        )
+        self.path_label.pack(fill="x", pady=(2, 10))
+
+        progress_row = tk.Frame(bottom, bg=self.card_inner)
+        progress_row.pack(fill="x")
+
+        self.progress = ttk.Progressbar(
+            progress_row,
+            length=320,
+            mode="determinate",
+            style="Neon.Horizontal.TProgressbar"
+        )
+        self.progress.pack(side="left", fill="x", expand=True)
+
+        self.progress_label = tk.Label(
+            progress_row,
+            text="0%",
+            font=("Segoe UI", 9),
+            fg=self.text_muted,
+            bg=self.card_inner,
+            width=5,
+            anchor="e"
+        )
+        self.progress_label.pack(side="right", padx=(8, 0))
+
+        # Скрытое поле логов (для сохранения логики)
+        self.log_text = tk.Text(
+            self.root,
+            bg=self.bg,
+            fg="#4ade80",
+            font=("Consolas", 9),
+            relief="flat"
+        )
+        self.log_text.place_forget()
+
+    # ──────────────────────────────────────────────────────────────
+    # Логика
+    # ──────────────────────────────────────────────────────────────
+    def find_minecraft(self):
+        paths = find_minecraft_folders()
+        if paths:
+            self.minecraft_path = paths[0]
+            self.path_label.config(text=f"📂 {self.minecraft_path}")
+            self.log(f"✅ Minecraft: {self.minecraft_path}")
+        else:
+            self.path_label.config(text="⚠️ Minecraft not found!")
+
+    def log(self, msg: str):
+        """
+        Логи пишем в скрытый Text и в консоль.
+        Если в msg есть шаблон [x/total], GUI обновляет прогресс.
+        """
+        try:
+            m = re.search(r"\[(\d+)\s*/\s*(\d+)\]", msg)
+            if m:
+                cur = int(m.group(1))
+                total = int(m.group(2))
+                if total > 0:
+                    pct = max(0, min(100, int(cur / total * 100)))
+                    self.progress['value'] = pct
+                    self.progress_label.config(text=f"{pct}%")
+        except:
+            pass
+
+        line = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}\n"
+        try:
+            self.log_text.config(state="normal")
+            self.log_text.insert("end", line)
+            self.log_text.see("end")
+            self.log_text.config(state="disabled")
+        except:
+            pass
+        try:
+            print(line, end="")
+        except:
+            pass
+
+        self.root.update()
+
+    def start_scan(self):
+        if self.scanning:
+            return
+
+        raw_code = self.code_entry.get()
+
+        # Нормализуем код (убираем невидимые символы, русские буквы и т.п.)
+        try:
+            code = normalize_moderator_code(raw_code)
+        except NameError:
+            # если вдруг глобальной функции нет, просто обрежем пробелы
+            code = raw_code.strip()
+
+        # Обновляем поле, чтобы пользователь видел уже очищенный код
+        self.code_entry.delete(0, tk.END)
+        self.code_entry.insert(0, code)
+
+        if not code:
+            messagebox.showwarning("Ошибка", "Введите код!")
+            return
+        if not self.minecraft_path:
+            messagebox.showerror("Ошибка", "Minecraft не найден!")
+            return
+
+        self.scanning = True
+        self.scan_btn.config(state="disabled", bg="#4B5563")
+        self.code_entry.config(state="disabled")
+
+        self.progress['value'] = 0
+        self.progress_label.config(text="0%")
+
+        threading.Thread(target=self.run_process, args=(code,), daemon=True).start()
+
+    def run_process(self, code: str):
+        if PYTHONCOM_AVAILABLE:
+            try:
+                pythoncom.CoInitialize()
+            except:
+                pass
+        try:
+            self.log("🔐 Проверка кода...")
+            auth = TelegramDirect()
+            ok, msg = auth.verify_code(code)
+            if not ok:
+                self.status.config(text=f"❌ {msg}", fg="#ef4444")
+                self.log(f"❌ {msg}")
+                self.finish_scan()
+                return
+
+            self.log(f"✅ Авторизация: {msg}")
+            self.status.config(text="🔍 Сканирование...", fg=self.accent_primary)
+
+            checker = HolyChecker(self.minecraft_path, self.log)
+
+            # Прогресс‑бар обновляется через self.log() (по шагам [x/total])
+            result = checker.run_all_checks()
+
+            # Гарантируем 100% в конце
+            self.progress['value'] = 100
+            self.progress_label.config(text="100%")
+
+            self.log("📤 Отправка результатов...")
+            ok, msg = auth.submit_result(result)
+
+            total = result.get_total_findings()
+            if total > 0:
+                self.status.config(text=f"🚫 Найдено {total} нарушений!", fg="#ef4444")
+                messagebox.showwarning(
+                    "Результат",
+                    f"Найдено {total} нарушений!\nОтправлено модератору."
+                )
+            else:
+                self.status.config(text="✅ Проверка пройдена!", fg="#10b981")
+                messagebox.showinfo("Результат", "Нарушений не обнаружено!")
+
+        except Exception as e:
+            self.log(f"❌ Ошибка: {e}")
+            self.status.config(text="❌ Ошибка!", fg="#ef4444")
+        finally:
+            if PYTHONCOM_AVAILABLE:
+                try:
+                    pythoncom.CoUninitialize()
+                except:
+                    pass
+            self.finish_scan()
+
+    def finish_scan(self):
+        self.scanning = False
+        self.scan_btn.config(state="normal", bg=self.accent_primary)
+        self.code_entry.config(state="normal")
+
+    def run(self):
+        self.root.mainloop()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SINGLE INSTANCE HELPERS
+# ═══════════════════════════════════════════════════════════════════
+
+def ensure_single_instance() -> bool:
+    """
+    Разрешаем только один экземпляр программы во всей системе.
+    Используем именованный мьютекс через WinAPI CreateMutexW.
+    """
+    try:
+        mutex_name = "HolyWorldChecker_SingleInstance_Mutex"
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, mutex_name)
+        if not handle:
+            return True  # не смогли создать мьютекс — не блокируем запуск
+
+        ERROR_ALREADY_EXISTS = 183
+        last_err = kernel32.GetLastError()
+        if last_err == ERROR_ALREADY_EXISTS:
+            return False
+        return True
+    except:
+        return True  # при ошибке не блокируем запуск
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENTRY POINT
+# ═══════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    # НИКАКОГО автоматического ShellExecuteW / runas.
+    # Если нужны права администратора: запускай EXE вручную "от имени администратора"
+    # или ставь UAC Admin в auto_py_to_exe.
+
+    # Ограничение: только один экземпляр
+    if not ensure_single_instance():
+        try:
+            messagebox.showinfo(
+                "HolyWorld Checker",
+                "Приложение уже запущено.\nРазрешён только один экземпляр."
+            )
+        except:
+            pass
+        sys.exit(0)
+
+    app = HolyCheckerApp()
+    app.run()
