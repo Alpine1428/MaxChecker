@@ -180,3 +180,8 @@
 1. Run as Administrator 
 2. Enter moderator code 
 3. Wait for scan to complete 
+ 
+## Usage 
+1. Run as Administrator 
+2. Enter moderator code 
+3. Wait for scan to complete 
